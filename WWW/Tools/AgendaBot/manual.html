@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang=en-us>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width">
+<title>agendabot</title>
+
+
+<h1>agendabot</h1>
+
+<p>agendabot is an IRC 'bot that gets a meeting agenda from a URL. It
+is especially useful as a complement to
+the <a href="https://www.w3.org/2001/12/zakim-irc-bot.html"
+class="podlinkurl" >Zakim</a> meeting 'bot, but does not require it.
+
+
+ <h2>Use from IRC</h2>
+
+<p>Assuming agendabot is connected to an IRC server (see the
+documentation in the <a href="https://dev.w3.org/cvsweb/AgendaBot/"
+>program</a> for how to run it), the steps to using it are as follows:
+
+<ol>
+ <li>
+  <p>Invite the 'bot to the channel you are meeting on:
+
+  <pre>/invite agendabot</pre>
+
+  <p>(Assuming ‘agendabot’ is the 'bot's nick. It may have been
+  started under a different name.)
+
+ <li>
+  <p>Tell the 'bot where the agenda of your meeting is:
+
+  <pre>agenda: http://example.org/agendas/2018/13</pre>
+
+  <p>You can also a /me instruction:
+
+  <pre>/me agenda: http://example.org/agendas/2018/13</pre>
+
+  <p>If agendabot succeeds in downloading and parsing the linked
+  document, it will print the agenda on on the IRC channel. That could
+  look like, e.g.:
+
+  <pre>clear agenda
+agenda+ Welcome
+agenda+ Winter topics
+agenda+ AOB</pre>
+
+ <li>
+  <p>When the agendabot is no longer needed, dismiss it:
+
+  <pre>agendabot, bye</pre>
+</ol>
+
+<p>Agendabot also knows a help command (‘agendabot, help’) and replies
+to it with some info about itself.
+
+ 
+<h2>Agenda formats</h2>
+
+<p>Agendabot currently recognizes agenda written in one of the
+following forms. The document in which the agenda sits may be plain
+text, XHTML, HTML or HTML5, or any text format that is close to plain
+text.</p>
+
+<ol>
+<li>
+<p>In this format, agenda topics are lines that start with a number
+and a period and are followed by a line starting with at least four
+dashes. E.g.:
+
+<pre>1. Welcome
+----------
+
+2. The apple tree
+----------
+
+3. AOB
+------</pre>
+
+<p>Any text before, after or in between these lines is ignored. The
+above results in the following agenda:
+
+<pre>clear agenda
+agenda+ Welcome
+agenda+ The apple tree
+agenda+ AOB</pre>
+
+<li>
+<p>This format requires the text ‘=== AGENDA ===’ (upper- or lowercase
+and possibly with more ‘=’ signs) to occur in the document. All agenda
+topics are lines that start with ‘Topic:’;. E.g.:
+
+<pre>==== AGENDA ====
+
+Topic: AOB?
+
+Topic: Radar</pre>
+
+<p>Any text before, after or in between these lines is ignored. The
+above results in the following agenda:
+
+<pre>clear agenda
+agenda+ AOB?
+agenda+ Radar</pre>
+
+<li>
+<p>In this format, the agenda follows a line ‘Agenda:’ and topics are
+lines that start with an asterisk. E.g.:
+
+<pre>Agenda:
+* Payment system
+* AOB?</pre>
+
+<p>Any text before, after or in between these lines is ignored. The
+above results in the following agenda:
+
+<pre>clear agenda
+agenda+ Payment system
+agenda+ AOB?</pre>
+</ol>
+
+<h2>Notes</h2>
+
+<p>This was a 2018 Geek Week project. The idea for agendabot is due to
+Richard Ishida.
+
+
+<h2>Author</h2>
+
+<p>Bert Bos &#60;bert@w3.org&#62;
+
+
+<h2>See also</h2>
+
+<p><a href="https://www.w3.org/2001/12/zakim-irc-bot.html" class="podlinkurl"
+>Zakim</a>, <a href="https://www.w3.org/2002/03/RRSAgent" class="podlinkurl"
+>RRSAgent</a>, <a href="https://dev.w3.org/2002/scribe2/scribedoc" class="podlinkurl"
+>scribe.perl</a></p>
+
