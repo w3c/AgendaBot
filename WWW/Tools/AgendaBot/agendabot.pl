@@ -492,7 +492,7 @@ what it is doing.
 This was a 2018 Geek Week project. The idea for the program is due to
 Richard Ishida.
 
-=cut=head1 AUTHOR
+=head1 AUTHOR
 
 Bert Bos E<lt>bert@w3.org>
 
@@ -502,6 +502,4 @@ L<Zakim|https://www.w3.org/2001/12/zakim-irc-bot.html>,
 L<RRSAgent|https://www.w3.org/2002/03/RRSAgent>,
 L<scribe.perl|https://dev.w3.org/2002/scribe2/scribedoc>
 
-
-
-    
+=cut
