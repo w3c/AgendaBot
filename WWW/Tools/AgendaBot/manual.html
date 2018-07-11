@@ -55,6 +55,16 @@ agenda+ AOB</pre>
 <p>Agendabot also knows a help command (‘agendabot, help’) and replies
 to it with some info about itself.
 
+<h3>Slow?</h3>
+
+<p>Agendabot may appear to be slow. Occasionally that may be because
+the Web server is slow to deliver the requested agenda, but most
+likely you are seeing the so-called flood protection. The 'bot pauses
+before every line, to avoid being kicked off the channel for sending
+too much text in too short a time.
+
+<p>Just be patient…
+
  
 <h2>Agenda formats</h2>
 
@@ -119,6 +129,23 @@ above results in the following agenda:
 <pre>clear agenda
 agenda+ Payment system
 agenda+ AOB?</pre>
+
+<li>
+<p>This format already uses Zakim's format, i.e., topics are lines
+that start with "agenda+". E.g.:
+
+<pre class=command>agenda+ Roundtable
+agenda+ TPAC registration
+agenda+ Next meeting</pre>
+
+<p>Any text before, after or in between these lines is ignored. The
+above results in the following agenda:
+
+<pre>clear agenda
+agenda+ Roundtable
+agenda+ TPAC registration
+agenda+ Next meeting</pre>
+
 </ol>
 
 <h2>Notes</h2>
