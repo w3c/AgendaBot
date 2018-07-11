@@ -42,7 +42,8 @@ use constant VERSION => '0.1';
 my @parsers = (
   \&bb_agenda_parser,
   \&addison_agenda_parser,
-  \&vivien_agenda_parser);
+  \&vivien_agenda_parser,
+  \&philippe_agenda_parser);
 
 
 # get -- get the contents of a file by its URL
@@ -267,8 +268,8 @@ sub addison_agenda_parser($$)
   # Topic: Radar
   #
   $document =~ s/<[^>]*>//g if $mediatype =~ /html|xml/; # Strip tags
-  return () if $document !~ /==\s*AGENDA\s*==/i;
-  push @agenda, $1 while $document =~ /^\s*Topic\s*:\s*(.+)/mgi;
+  return () if $document !~ /==\h*AGENDA\h*==/i;
+  push @agenda, $1 while $document =~ /^\h*Topic\h*:\h*(.+)/mgi;
   return @agenda;
 }
 
@@ -287,7 +288,25 @@ sub vivien_agenda_parser($$)
   #
   $document =~ s/<[^>]*>//g if $mediatype =~ /html|xml/; # Strip tags
   $document =~ s/.*?\nAgenda://si or return ();
-  push @agenda, $1 while $document =~ /^\s*\*\s*(.*)/mg;
+  push @agenda, $1 while $document =~ /^\h*\*\h*(.*)/mg;
+  return @agenda;
+}
+
+
+# philippe_agenda_parser -- find an agenda in Philippe's style
+sub philippe_agenda_parser($$)
+{
+  my ($mediatype, $document) = @_;
+  my @agenda;
+
+  # The agenda already uses Zakim's format, i.e., topics are prefixed
+  # with "agenda+":
+  #
+  # agenda+ Roundtable
+  # agenda+ TPAC registration
+  #
+  $document =~ s/<[^>]*>//g if $mediatype =~ /html|xml/; # Strip tags
+  push @agenda, $1 while $document =~ /^\h*agenda\+\h+(.*)/mgi;
   return @agenda;
 }
 
@@ -457,6 +476,23 @@ results in the following agenda:
  clear agenda
  agenda+ Payment system
  agenda+ AOB?
+
+=item 4.
+
+This format is simply the same as the output, apart from any redundant
+whitespace. I.e., topics are lines that start with "agenda+". E.g.:
+
+ agenda+ Roundtable
+ agenda+ TPAC registration
+ agenda+ Next meeting
+
+Any text before, after or in between these lines is ignored. The above
+results in the following agenda:
+
+ clear agenda
+ agenda+ Roundtable
+ agenda+ TPAC registration
+ agenda+ Next meeting
 
 =back
 
