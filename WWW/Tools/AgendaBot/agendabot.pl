@@ -10,6 +10,10 @@
 # memory. It should either not keep them in memory permanently, or
 # encrypt them.
 #
+# TODO: Fix information leak: Agendabot will extract an agenda from
+# any resource it has a password for, even if the person asking for
+# the agenda wouldn't be able to read that agenda himself.
+#
 # Created: 2018-07-09
 # Author: Bert Bos <bert@w3.org>
 #
@@ -244,7 +248,7 @@ sub bb_agenda_parser($$)
   # 1. Welcome
   # ----------
   #
-  $document =~ s/<[^>]*>//g if $mediatype =~ /html/; # Strip tags
+  $document =~ s/<[^>]*>//g if $mediatype =~ /html|xml/; # Strip tags
   push @agenda, $1 while $document =~ /^[ \t]*[0-9]+.[ \t]*(.+)\r?\n----/mg;
   return @agenda;
 }
@@ -262,7 +266,7 @@ sub addison_agenda_parser($$)
   # Topic: AOB?
   # Topic: Radar
   #
-  $document =~ s/<[^>]*>//g if $mediatype =~ /html/; # Strip tags
+  $document =~ s/<[^>]*>//g if $mediatype =~ /html|xml/; # Strip tags
   return () if $document !~ /==\s*AGENDA\s*==/i;
   push @agenda, $1 while $document =~ /^\s*Topic\s*:\s*(.+)/mgi;
   return @agenda;
@@ -281,7 +285,7 @@ sub vivien_agenda_parser($$)
   # * Payment system
   # * AOB?
   #
-  $document =~ s/<[^>]*>//g if $mediatype =~ /html/; # Strip tags
+  $document =~ s/<[^>]*>//g if $mediatype =~ /html|xml/; # Strip tags
   $document =~ s/.*?\nAgenda://si or return ();
   push @agenda, $1 while $document =~ /^\s*\*\s*(.*)/mg;
   return @agenda;
@@ -391,7 +395,8 @@ Stop it with Control-C or the kill(1) command.
 
 Agendabot currently recognizes agenda written in one of the following
 forms. The document in which the agenda sits may be plain text, XHTML,
-HTML or HTML5, or any text format that is close to plain text.
+HTML, HTML5, XML (text/xml only), or any text format that is close to
+plain text.
 
 =over
 
@@ -486,6 +491,17 @@ Be verbose. Makes the 'bot print a log to standard error output of
 what it is doing.
 
 =back
+
+=head1 BUGS
+
+Parsing of XHTML/HTML/HTML5/XML is not complete. In particular
+occurrences of E<lt> or E<gt> in attributes or CDATA sections may
+cause missed or false matches.
+
+The current parsers in agendabot will try to parse any other text/*
+format as if it was plain text, which may give strange results. E.g.,
+text/enriched may have formatting codes such as E<lt>bold> or
+E<lt>italic>, which are not removed.
 
 =head1 NOTES
 
