@@ -36,7 +36,7 @@ use Getopt::Std;
 use POSIX qw(strftime);
 use Scalar::Util 'blessed';
 
-use constant HOME => 'https://www.w3.org/SOME_URL_FOR_AgendaBot';
+use constant HOME => 'https://dev.w3.org/AgendaBot/manual.html';
 use constant VERSION => '0.1';
 
 my @parsers = (
