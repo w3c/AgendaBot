@@ -2,7 +2,10 @@
 <html lang=en-us>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width">
-<title>agendabot</title>
+<title>Agendabot manual</title>
+<link rel=stylesheet type="text/css"
+   href="https://www.w3.org/Guide/guide2006.css">
+<link rel="shortcut icon" href="https://www.w3.org/Icons/WWW/Literature.gif">
 
 
 <h1>agendabot</h1>
@@ -13,7 +16,7 @@ the <a href="https://www.w3.org/2001/12/zakim-irc-bot.html"
 class="podlinkurl" >Zakim</a> meeting 'bot, but does not require it.
 
 
- <h2>Use from IRC</h2>
+<h2>Use from IRC</h2>
 
 <p>Assuming agendabot is connected to an IRC server (see the
 documentation in the <a href="https://dev.w3.org/cvsweb/AgendaBot/"
@@ -23,22 +26,19 @@ documentation in the <a href="https://dev.w3.org/cvsweb/AgendaBot/"
  <li>
   <p>Invite the 'bot to the channel you are meeting on:
 
-  <pre>/invite agendabot</pre>
-
-  <p>(Assuming ‘agendabot’ is the 'bot's nick. It may have been
-  started under a different name.)
+  <pre class=command>/invite agendabot</pre>
 
  <li>
   <p>Tell the 'bot where the agenda of your meeting is:
 
-  <pre>agenda: http://example.org/agendas/2018/13</pre>
+  <pre class=command>agenda: http://example.org/agendas/2018/13</pre>
 
-  <p>You can also a /me instruction:
+  <p>You can also use a /me instruction:
 
-  <pre>/me agenda: http://example.org/agendas/2018/13</pre>
+  <pre class=command>/me agenda: http://example.org/agendas/2018/13</pre>
 
   <p>If agendabot succeeds in downloading and parsing the linked
-  document, it will print the agenda on on the IRC channel. That could
+  document, it will print the agenda to the IRC channel. That could
   look like, e.g.:
 
   <pre>clear agenda
@@ -49,7 +49,7 @@ agenda+ AOB</pre>
  <li>
   <p>When the agendabot is no longer needed, dismiss it:
 
-  <pre>agendabot, bye</pre>
+  <pre class=command>agendabot, bye</pre>
 </ol>
 
 <p>Agendabot also knows a help command (‘agendabot, help’) and replies
@@ -58,10 +58,11 @@ to it with some info about itself.
  
 <h2>Agenda formats</h2>
 
-<p>Agendabot currently recognizes agenda written in one of the
-following forms. The document in which the agenda sits may be plain
-text, XHTML, HTML or HTML5, or any text format that is close to plain
-text.</p>
+<p>When given a URL, agendabot tries to retrieve the document at that
+URL and scan it for text that looks like an agenda. Agendabot
+currently recognizes agendas in one of the following forms. The
+document may be plain text, XHTML, HTML or HTML5, or any text format
+that is close to plain text.</p>
 
 <ol>
 <li>
@@ -69,7 +70,7 @@ text.</p>
 and a period and are followed by a line starting with at least four
 dashes. E.g.:
 
-<pre>1. Welcome
+<pre class=command>1. Welcome
 ----------
 
 2. The apple tree
@@ -91,7 +92,7 @@ agenda+ AOB</pre>
 and possibly with more ‘=’ signs) to occur in the document. All agenda
 topics are lines that start with ‘Topic:’;. E.g.:
 
-<pre>==== AGENDA ====
+<pre class=command>==== AGENDA ====
 
 Topic: AOB?
 
@@ -108,7 +109,7 @@ agenda+ Radar</pre>
 <p>In this format, the agenda follows a line ‘Agenda:’ and topics are
 lines that start with an asterisk. E.g.:
 
-<pre>Agenda:
+<pre class=command>Agenda:
 * Payment system
 * AOB?</pre>
 
