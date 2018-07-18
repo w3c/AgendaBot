@@ -35,6 +35,7 @@ use LWP;
 use Getopt::Std;
 use POSIX qw(strftime);
 use Scalar::Util 'blessed';
+use Term::ReadKey;		# To read a password without echoing
 
 use constant HOME => 'https://dev.w3.org/AgendaBot/manual.html';
 use constant VERSION => '0.1';
@@ -313,7 +314,7 @@ sub philippe_agenda_parser($$)
 
 # Main body
 
-my (%opts, $ssl, $host, $port, %passwords);
+my (%opts, $ssl, $user, $password, $host, $port, %passwords);
 
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
 getopts('c:n:N:v', \%opts) or die "Try --help\n";
@@ -321,14 +322,22 @@ die "Usage: $0 [options] [--help] irc[s]://server...\n" if $#ARGV != 0;
 
 # The single argument must be an IRC-URL.
 #
-$ARGV[0] =~ m#^(ircs?)://(?:[^:@/]+:[^@/]*@)?([^:/]+)(?::([^/]*))?/#i or
+$ARGV[0] =~ m/^(ircs?):\/\/(?:([^:]+):([^@]+)?@)?([^:\/#?]+)(?::([^\/]*))?/i or
     die "Argument must be a URI starting with `irc:' or `ircs:'\n";
 $ssl = $1 eq 'ircs';
-$host = $2;
-$port = $3 // ($ssl ? 6697 : 6667);
-# TODO: Do something with the userinfo ("user:password")
+$user = $2 =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/egr if defined $2;
+$password = $3 =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/egr if defined $3;
+$host = $4;
+$port = $5 // ($ssl ? 6697 : 6667);
 # TODO: Do something with any passed channel name
 # TODO: Do something with other parameters, such as a key
+if (defined $user && !defined $password) {
+  print "Password for user \"$user\": ";
+  ReadMode('noecho');
+  $password = ReadLine(0);
+  ReadMode('restore');
+  print "\n";
+}
 
 %passwords = read_passwords_from_file($opts{'c'}) if defined $opts{'c'};
 
@@ -336,6 +345,8 @@ my $bot = AgendaBot->new(
   server => $host,
   port => $port,
   ssl => $ssl,
+  username => $user,
+  password => $password,
   nick => $opts{'n'} // 'agendabot',
   name => $opts{'N'} // 'AgendaBot',
   passwords => \%passwords // {},
@@ -374,6 +385,67 @@ form suitable for the Zakim 'bot, i.e., it prints something like:
 It tries various parsers in turn to read the document and uses the
 results of the parser that recognized the most agenda topics. (See
 L</"Agenda formats"> below.)
+
+=head2 Specifying the IRC server
+
+The I<URL> argument is a URL that specifies the server to connect to.
+It must be of one of the following forms:
+
+=over
+
+=item 1.
+
+irc://I<server>/I<other_text>
+
+=item 2.
+
+irc://I<server>:I<port>/I<other_text>
+
+=item 3.
+
+irc://I<username>:I<password>@I<server>/I<other_text>
+
+=item 4.
+
+irc://I<username>:I<password>@I<server>:I<port>/I<other_text>
+
+=item 5.
+
+ircs://I<server>/I<other_text>
+
+=item 6.
+
+ircs://I<server>:I<port>/I<other_text>
+
+=item 7.
+
+ircs://I<username>:I<password>@I<server>/I<other_text>
+
+=item 8.
+
+ircs://I<username>:I<password>@I<server>:I<port>/I<other_text>
+
+=back
+
+The I<other_text>, if not empty, is ignored, i.e., if the text
+contains a channel name, agendabot does not automatically join that
+channel.
+
+The prefix "ircs" indicates that the server uses SSL. The I<port>, if
+omitted, defaults to 6667 (for "irc") or 6697 (for "ircs").
+
+If the server requires a username and password, they can be be
+inserted before the server name, separated by a colon and ending with
+an at sign.
+
+If username is given, but the passord is left empty, agendabot will
+prompt for a password. This is useful to avoid that the password is
+visible in the list of running processes or that somebody can read it
+over your shoulder while you type the command.
+
+Note that many characters in the username or password must be
+URL-escaped. E.g., a "@" must be written as "%40", ":" must be written
+as "%3a", "/" as "%2f", etc.
 
 =head2 IRC commands
 
