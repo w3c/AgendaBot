@@ -14,6 +14,14 @@
 # any resource it has a password for, even if the person asking for
 # the agenda wouldn't be able to read that agenda himself.
 #
+# TODO: If the nick is already in use, try again with a different one.
+#
+# TODO: Don't join a channel if there is another instance of AgendaBot
+# already.
+#
+# TODO: Show the agenda and ask for confirmation before putting it in
+# Zakim's form. (Vivien's idea.)
+#
 # Created: 2018-07-09
 # Author: Bert Bos <bert@w3.org>
 #
