@@ -146,6 +146,23 @@ agenda+ Roundtable
 agenda+ TPAC registration
 agenda+ Next meeting</pre>
 
+<li>
+<p>This format has the word "Agenda" somewhere in the text and topics
+are lines that start with a number, a period and a space. E.g.:
+
+<pre>Agenda telcon 20 July
+0. Extra agenda items and other digressions
+1. [css-display] Blockifications
+2. [cssom-1] Replace steps of set a CSS declaration</pre>
+
+<p>Any text before, after or in between these lines is ignored. The
+above results in the following agenda:
+
+<pre>clear agenda
+agenda+ Extra agenda items and other digressions
+agenda+ [css-display] Blockifications
+agenda+ [cssom-1] Replace steps of set a CSS declaration</pre>
+
 </ol>
 
 <h2>Notes</h2>
