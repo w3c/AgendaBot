@@ -1,10 +1,11 @@
 #!/usr/bin/perl
 #
-# This IRC 'bot looks for lines of the form "agenda: URL" (where URL
-# is some URL) and tries to find a meeting agenda at that URL. If it
-# succeeds in finding an agenda, it prints it on IRC in a form
-# suitable for the Zakim 'bot. (More documentation at the end in
-# perlpod format.)
+# This IRC 'bot looks for lines of the form "agenda: URL" and tries to
+# find a meeting agenda at that URL. If it succeeds, it prints the
+# agenda on IRC in a form suitable for the Zakim 'bot.
+#
+# More documentation at the end in perlpod format.
+#
 #
 # TODO: When given a -c option, agendabot loads all passwords into
 # memory. It should either not keep them in memory permanently, or
@@ -13,6 +14,13 @@
 # TODO: Fix information leak: Agendabot will extract an agenda from
 # any resource it has a password for, even if the person asking for
 # the agenda wouldn't be able to read that agenda himself.
+# The only current protection is that Agendabot will only retrieve
+# password-protected resources if asked on a server-local channel (one
+# starting with "&"), and not if asked on a public channel (starting
+# with "#") or in a private message.
+#
+# TODO: Judy's idea: after a meeting, defer remaining agenda items to
+# the next meeting. (Or is that more something for Zakim?)
 #
 # TODO: If the nick is already in use, try again with a different one.
 #
@@ -20,7 +28,10 @@
 # already.
 #
 # TODO: Show the agenda and ask for confirmation before putting it in
-# Zakim's form. (Vivien's idea.)
+# Zakim's format. (Vivien's idea.)
+#
+# TODO: Automatically part a channel after a certain period of
+# inactivity?
 #
 # Created: 2018-07-09
 # Author: Bert Bos <bert@w3.org>
@@ -48,19 +59,20 @@ use Term::ReadKey;		# To read a password without echoing
 use constant HOME => 'https://dev.w3.org/AgendaBot/manual.html';
 use constant VERSION => '0.1';
 
-my @parsers = (
+my @parsers = (			# Subroutines to try and recognize an agenda
   \&bb_agenda_parser,
   \&addison_agenda_parser,
   \&vivien_agenda_parser,
-  \&philippe_agenda_parser);
+  \&koalie_and_plh_agenda_parser,
+  \&csswg_agenda_parser);
 
 
 # get -- get the contents of a file by its URL
 sub get($$)
 {
-  my ($self, $uri) = @_;
-  my ($ua, $res, $realm, $user, $password, $user_and_pass, $challenge);
-  my %passwords;
+  my ($self, $info, $uri) = @_;
+  my $channel = $info->{channel};
+  my ($ua, $res, $realm, $user, $password, $user_pass, $challenge, %passwords);
 
   $ua = LWP::UserAgent->new;
   $ua->agent(blessed($self) . '/' . VERSION);
@@ -70,9 +82,14 @@ sub get($$)
 
   $res = $ua->get($uri);
 
-  if ($res->code == 401) {
+  if ($res->code == 401) {	# The resource requires authentication
 
-    # See if we have a password and try again. First extract the realm.
+    if ($channel !~ /^&/) {	# Not a server-local channel?
+      $self->log("Refusing private page on public channel $channel: $uri");
+      return (403, undef, undef);
+    }
+
+    # Check the authentication method, extract the realm.
     #
     $challenge = $res->header('WWW-Authenticate');
     if ($challenge !~ /(?:Basic|Digest) realm="(.*)"/i) {
@@ -84,12 +101,12 @@ sub get($$)
     # See if we know a password for this host and realm.
     #
     %passwords = %{$self->{passwords}};
-    $user_and_pass = $passwords{$res->base->host_port . "\t" . $realm};
-    if (!defined $user_and_pass) {
+    $user_pass = $passwords{$res->base->host_port . "\t" . $realm};
+    if (!defined $user_pass) {
       $self->log("No password known for $uri");
       return (401, undef, undef);
     }
-    ($user, $password) = split /\t/, $user_and_pass;
+    ($user, $password) = split /\t/, $user_pass;
 
     # Hand the login and password to $ua and try to get the URI again.
     #
@@ -116,10 +133,11 @@ sub parse_and_print_agenda($$$)
 
   # Try to download the resource.
   #
-  ($code, $mediatype, $document) = $self->get($uri);
-  return "Sorry, I don't have a password for $uri" if $code == 401;
-  return "Sorry, $uri doesn't seem to exist" if $code == 404;
-  return "Sorry, could not retrieve $uri (code $code)" if !defined $document;
+  ($code, $mediatype, $document) = $self->get($info, $uri);
+  return "Sorry, $who, I don't have a password for $uri" if $code == 401;
+  return "Sorry, $who, the document at $uri is protected." if $code == 403;
+  return "Sorry, $who, $uri doesn't seem to exist." if $code == 404;
+  return "Sorry, $who, could not get $uri (code $code)." if !defined $document;
 
   # Try all parsers in turn to see which one returns the longest agenda.
   #
@@ -128,7 +146,7 @@ sub parse_and_print_agenda($$$)
     @agenda = @h if $#h > $#agenda;
   }
   $self->log("Found ".($#agenda+1)." topics in $uri");
-  return "Sorry, I did not recognize any agenda in $uri" if $#agenda == -1;
+  return "Sorry, $who, I did not recognize any agenda in $uri" if $#agenda==-1;
 
   # Print the agenda in Zakim's format.
   #
@@ -157,7 +175,6 @@ sub invited($$)
 sub said($$)
 {
   my ($self, $info) = @_;
-
   my $who = $info->{who};		# Nick (without the "!domain" part)
   my $text = $info->{body};		# What Nick said
   my $channel = $info->{channel};	# "#channel" or "msg"
@@ -170,7 +187,7 @@ sub said($$)
     $self->part_channel($channel);
     return undef;		# No reply
   } elsif ($addressed) {
-    return "Sorry, I don't understand \"$text\". Try \"$me, help\".";
+    return "Sorry, $who, I don't understand \"$text\". Try \"$me, help\".";
   }
 }
 
@@ -197,7 +214,7 @@ sub connected($)
 }
 
 
-# log -- print a message to STDERR, if -v (verbose) was specified
+# log -- print a message to STDERR, but only if -v (verbose) was specified
 sub log
 {
   my ($self, @messages) = @_;
@@ -224,8 +241,8 @@ sub read_passwords_from_file($)
   # TODO: Can there be tabs in any of these fields?
   #
   while (<$fh>) {
-    if (/^#/) {}
-    elsif (/^\s*$/) {}
+    if (/^#/) {}		# Comment line
+    elsif (/^\s*$/) {}		# Empty line
     elsif (/^(.*\t.*)\t(.*\t.*)$/) {$passwords{$1} = $2;}
     else {die "$path:$.: Syntax error: line does not have four fields.";}
   }
@@ -302,8 +319,8 @@ sub vivien_agenda_parser($$)
 }
 
 
-# philippe_agenda_parser -- find an agenda in Philippe's style
-sub philippe_agenda_parser($$)
+# koalie_and_plh_agenda_parser -- find an agenda in Coralie's/Philippe's style
+sub koalie_and_plh_agenda_parser($$)
 {
   my ($mediatype, $document) = @_;
   my @agenda;
@@ -318,6 +335,26 @@ sub philippe_agenda_parser($$)
   push @agenda, $1 while $document =~ /^\h*agenda\+\h+(.*)/mgi;
   return @agenda;
 }
+
+
+# csswg_agenda_parser -- find an agenda in the style of Alan Stearns
+sub csswg_agenda_parser($$)
+{
+  my ($mediatype, $document) = @_;
+  my @agenda;
+
+  # The agenda has "Agenda" in its title and numbered topics:
+  #
+  # 0. Extra agenda items and other digressions
+  # 1. [css-display] Blockifications should establish BFC in block containers
+  # 2. [cssom-1] Replace steps of set a CSS declaration with some constraints
+  #
+  $document =~ s/<[^>]*>//g if $mediatype =~ /html|xml/; # Strip tags
+  return () if $document !~ /\bAgenda\b/i;
+  push @agenda, $1 while $document =~ /^[0-9]+\.\h+(.*)/mgi;
+  return @agenda;
+}
+
 
 
 # Main body
@@ -573,6 +610,24 @@ results in the following agenda:
  agenda+ Roundtable
  agenda+ TPAC registration
  agenda+ Next meeting
+
+=item 5.
+
+This format has the word "Agenda" somewhere in the text and topics are
+lines that start with a number, a period and a space. E.g.:
+
+ Agenda telcon 20 July
+ 0. Extra agenda items and other digressions
+ 1. [css-display] Blockifications
+ 2. [cssom-1] Replace steps of set a CSS declaration
+
+Any text before, after or in between these lines is ignored. The above
+results in the following agenda:
+
+ clear agenda
+ agenda+ Extra agenda items and other digressions
+ agenda+ [css-display] Blockifications
+ agenda+ [cssom-1] Replace steps of set a CSS declaration</pre>
 
 =back
 
