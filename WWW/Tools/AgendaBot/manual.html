@@ -55,6 +55,9 @@ agenda+ AOB</pre>
 <p>Agendabot also knows a help command (‘agendabot, help’) and replies
 to it with some info about itself.
 
+<p>The reload command (‘agendabot, reload’) asks agendabot to reread
+the configuration files it was started with, if any.
+
 <h3>Slow?</h3>
 
 <p>Agendabot may appear to be slow. Occasionally that may be because
@@ -116,21 +119,6 @@ agenda+ AOB?
 agenda+ Radar</pre>
 
 <li>
-<p>In this format, the agenda follows a line ‘Agenda:’ and topics are
-lines that start with an asterisk. E.g.:
-
-<pre class=command>Agenda:
-* Payment system
-* AOB?</pre>
-
-<p>Any text before, after or in between these lines is ignored. The
-above results in the following agenda:
-
-<pre>clear agenda
-agenda+ Payment system
-agenda+ AOB?</pre>
-
-<li>
 <p>This format already uses Zakim's format, i.e., topics are lines
 that start with "agenda+". E.g.:
 
@@ -148,11 +136,15 @@ agenda+ Next meeting</pre>
 
 <li>
 <p>This format has the word "Agenda" somewhere in the text and topics
-are lines that start with a number, a period and a space. E.g.:
+are lines that start with "1)", "1.", "*", "•", "◦" or "⁃". If there
+are multiple markers in use, only the one with the smallest indent is
+used. The others are assumed to mark subtopics.
 
 <pre>Agenda telcon 20 July
 0. Extra agenda items and other digressions
 1. [css-display] Blockifications
+   * Positioning
+   * Syntax
 2. [cssom-1] Replace steps of set a CSS declaration</pre>
 
 <p>Any text before, after or in between these lines is ignored. The
