@@ -33,6 +33,9 @@
 # TODO: Automatically part a channel after a certain period of
 # inactivity?
 #
+# TODO: The list of security exception is searched with linear search.
+# That's only fine if the list is short.
+#
 # Created: 2018-07-09
 # Author: Bert Bos <bert@w3.org>
 #
@@ -55,6 +58,7 @@ use Getopt::Std;
 use POSIX qw(strftime);
 use Scalar::Util 'blessed';
 use Term::ReadKey;		# To read a password without echoing
+use utf8;
 
 use constant HOME => 'https://dev.w3.org/AgendaBot/manual.html';
 use constant VERSION => '0.1';
@@ -62,9 +66,48 @@ use constant VERSION => '0.1';
 my @parsers = (			# Subroutines to try and recognize an agenda
   \&bb_agenda_parser,
   \&addison_agenda_parser,
-  \&vivien_agenda_parser,
   \&koalie_and_plh_agenda_parser,
-  \&csswg_agenda_parser);
+  \&two_level_agenda_parser);
+
+
+# init -- initialize some parameters
+sub init($)
+{
+  my $self = shift;
+  my $errmsg;
+
+  $errmsg = $self->reload() and die "$errmsg\n";
+  return 1;
+}
+
+
+# reload - reload configuration files, return error message or undef
+sub reload($)
+{
+  my $self = shift;
+  my $errmsg;
+
+  if (($errmsg = $self->read_passwords_file())) {$self->log($errmsg);}
+  elsif (($errmsg = $self->read_security_exceptions())) {$self->log($errmsg);}
+  return $errmsg;
+}
+
+
+# is_exception -- check if a channel may get this URI
+sub is_exception($$$)
+{
+  my ($self, $channel, $uri) = @_;
+  my @exceptions = @{$self->{exceptions} // []};
+
+  # Find all URI prefixes that the channel may get. Check for each
+  # prefix if it is a prefix of the given uri.
+  #
+  foreach my $u (grep s/^\Q$channel\E\t//, @exceptions) {
+    $self->log("Security exception: $channel is allowed to get $uri");
+    return 1 if $uri =~ /^$u/;
+  }
+  return 0;
+}
 
 
 # get -- get the contents of a file by its URL
@@ -84,7 +127,8 @@ sub get($$)
 
   if ($res->code == 401) {	# The resource requires authentication
 
-    if ($channel !~ /^&/) {	# Not a server-local channel?
+    if ($channel !~ /^&/ &&	# Not a server-local channel
+	! $self->is_exception($channel, $uri)) {
       $self->log("Refusing private page on public channel $channel: $uri");
       return (403, undef, undef);
     }
@@ -100,7 +144,7 @@ sub get($$)
 
     # See if we know a password for this host and realm.
     #
-    %passwords = %{$self->{passwords}};
+    %passwords = %{$self->{passwords} // {}};
     $user_pass = $passwords{$res->base->host_port . "\t" . $realm};
     if (!defined $user_pass) {
       $self->log("No password known for $uri");
@@ -134,10 +178,10 @@ sub parse_and_print_agenda($$$)
   # Try to download the resource.
   #
   ($code, $mediatype, $document) = $self->get($info, $uri);
-  return "Sorry, $who, I don't have a password for $uri" if $code == 401;
-  return "Sorry, $who, the document at $uri is protected." if $code == 403;
-  return "Sorry, $who, $uri doesn't seem to exist." if $code == 404;
-  return "Sorry, $who, could not get $uri (code $code)." if !defined $document;
+  return "$who, sorry, I don't have a password for $uri" if $code == 401;
+  return "$who, sorry, the document at $uri is protected." if $code == 403;
+  return "$who, sorry, $uri doesn't seem to exist." if $code == 404;
+  return "$who, sorry, could not get $uri (code $code)." if !defined $document;
 
   # Try all parsers in turn to see which one returns the longest agenda.
   #
@@ -146,7 +190,7 @@ sub parse_and_print_agenda($$$)
     @agenda = @h if $#h > $#agenda;
   }
   $self->log("Found ".($#agenda+1)." topics in $uri");
-  return "Sorry, $who, I did not recognize any agenda in $uri" if $#agenda==-1;
+  return "$who, sorry, I did not recognize any agenda in $uri" if $#agenda==-1;
 
   # Print the agenda in Zakim's format.
   #
@@ -183,11 +227,14 @@ sub said($$)
 
   if ($text =~ /^agenda\s*:\s*(.+)$/i) {
     return $self->parse_and_print_agenda($info, $1);
-  } elsif ($addressed && $text =~ /^bye$/i) {
-    $self->part_channel($channel);
-    return undef;		# No reply
+  } elsif ($addressed && $text =~ /^bye\s*\.?$/i) {
+    return undef;			# No reply
+  } elsif ($addressed && $text =~ /^reload\s*\.?$/i) {
+    return $self->reload() // "configuration files have been reloaded.";
   } elsif ($addressed) {
-    return "Sorry, $who, I don't understand \"$text\". Try \"$me, help\".";
+    return "sorry, I don't understand \"$text\". Try \"$me, help\".";
+  } else {
+    return $self->SUPER::said($info);
   }
 }
 
@@ -226,29 +273,68 @@ sub log
 }
 
 
-# read_passwords_from_file -- read username/password for each domain/realm
-sub read_passwords_from_file($)
+# read_passwords_file -- read passwords from file, return error msg or undef
+sub read_passwords_file($)
 {
-  my ($path) = @_;
-  my %passwords = ();
-  my ($fh);
+  my $self = shift;
+  my (%passwords, $fh);
+  my $path = $self->{passwords_file};
 
-  open $fh, "<", $path or die "Cannot read $path\n";
+  return undef if !defined $path; # No file to read, not an error
 
   # Each line must be HOST:PORT\tREALM\tLOGIN\tPASSWORD. Empty lines
   # and lines that start with "#" are ignored.
   #
   # TODO: Can there be tabs in any of these fields?
   #
+  open $fh, "<", $path or return "$path: cannot be opened.";
   while (<$fh>) {
     if (/^#/) {}		# Comment line
     elsif (/^\s*$/) {}		# Empty line
     elsif (/^(.*\t.*)\t(.*\t.*)$/) {$passwords{$1} = $2;}
-    else {die "$path:$.: Syntax error: line does not have four fields.";}
+    else {return "$path:$.: Syntax error: line does not have four fields.";}
   }
-
   close $fh;
-  return %passwords;
+  $self->{passwords} = \%passwords;
+  return undef;			# No error
+}
+
+
+# read_security_exceptions -- read channels that may read protected agendas
+sub read_security_exceptions($)
+{
+  my $self = shift;
+  my ($mime_type, $document, $code, $uri, @exceptions);
+  my $info = {channel=>'&'};	# Simulate a server-local channel
+
+  $uri = $self->{security_exceptions_uri} or return; # Nothing to read, OK
+
+  ($code, $mime_type, $document) = $self->get($info, $uri);
+  return "sorry, I don't have a password for $uri" if $code == 401;
+  return "sorry, the document at $uri is protected." if $code == 403;
+  return "sorry, $uri doesn't seem to exist." if $code == 404;
+  return "sorry, I could not get $uri (code $code)." if !defined $document;
+
+  # The document must be plain text, each line with tab-separated fields:
+  # CHANNEL\tURL-PREFIX
+  #
+  return "sorry, $uri is not a text file." if $mime_type ne 'text/plain';
+  foreach (split /\r?\n/, $document) {
+    if (/^#\s+/) {}		# Comment line
+    elsif (/^\s*$/) {}		# Empty line
+    elsif (/^([^\t]*\t[^\t]*)$/) {push @exceptions, $1;}
+    else {return "sorry, $uri does not have the correct syntax.";}
+  }
+  $self->{exceptions} = \@exceptions;
+  return;			# No error message
+}
+
+
+# html_to_text -- remove tags and expand charactet entities
+sub html_to_text($)
+{
+  return $_[0] =~ s/<[^>]*>//gr =~ s/&lt;/</gr =~ s/&gt;/>/gr =~ s/&quot;/"/gr
+    =~ s/&apos;/'/gr =~ s/&amp;/&/gr;
 }
 
 
@@ -275,7 +361,7 @@ sub bb_agenda_parser($$)
   # 1. Welcome
   # ----------
   #
-  $document =~ s/<[^>]*>//g if $mediatype =~ /html|xml/; # Strip tags
+  $document = html_to_text($document) if $mediatype =~ /html|xml/;
   push @agenda, $1 while $document =~ /^[ \t]*[0-9]+.[ \t]*(.+)\r?\n----/mg;
   return @agenda;
 }
@@ -293,28 +379,9 @@ sub addison_agenda_parser($$)
   # Topic: AOB?
   # Topic: Radar
   #
-  $document =~ s/<[^>]*>//g if $mediatype =~ /html|xml/; # Strip tags
+  $document = html_to_text($document) if $mediatype =~ /html|xml/;
   return () if $document !~ /==\h*AGENDA\h*==/i;
   push @agenda, $1 while $document =~ /^\h*Topic\h*:\h*(.+)/mgi;
-  return @agenda;
-}
-
-
-# vivien_agenda_parser -- find an agenda in Vivien's style
-sub vivien_agenda_parser($$)
-{
-  my ($mediatype, $document) = @_;
-  my @agenda;
-
-  # The agenda follows "Agenda:" and items start with a "*":
-  #
-  # Agenda:
-  # * Payment system
-  # * AOB?
-  #
-  $document =~ s/<[^>]*>//g if $mediatype =~ /html|xml/; # Strip tags
-  $document =~ s/.*?\nAgenda://si or return ();
-  push @agenda, $1 while $document =~ /^\h*\*\h*(.*)/mg;
   return @agenda;
 }
 
@@ -331,27 +398,42 @@ sub koalie_and_plh_agenda_parser($$)
   # agenda+ Roundtable
   # agenda+ TPAC registration
   #
-  $document =~ s/<[^>]*>//g if $mediatype =~ /html|xml/; # Strip tags
+  $document = html_to_text($document) if $mediatype =~ /html|xml/;
   push @agenda, $1 while $document =~ /^\h*agenda\+\h+(.*)/mgi;
   return @agenda;
 }
 
 
-# csswg_agenda_parser -- find an agenda in the style of Alan Stearns
-sub csswg_agenda_parser($$)
+# two_level_agenda_parser -- find an agenda in the style of Axel Polleres
+sub two_level_agenda_parser($$)
 {
-  my ($mediatype, $document) = @_;
+  my ($mediatype, $doc) = @_;
   my @agenda;
+  my $i = 10000;		# Bigger than any expected indent
+  my $delim;
 
-  # The agenda has "Agenda" in its title and numbered topics:
+  # Topics and subtopics with various markers.
   #
-  # 0. Extra agenda items and other digressions
-  # 1. [css-display] Blockifications should establish BFC in block containers
-  # 2. [cssom-1] Replace steps of set a CSS declaration with some constraints
+  #     1) Roll call/self-introductions,
+  #        * ask for self introductions on the wiki....
+  #        * ... clarify how to register
+  #     2) Report on the workshop that initiated the group
+  # or:
+  #     * review Action items
+  #     * concrete topics per day:
+  #       1) fix call-details for future calls
+  #       2) discuss F2F at MyData, how can we reach out broader?
   #
-  $document =~ s/<[^>]*>//g if $mediatype =~ /html|xml/; # Strip tags
-  return () if $document !~ /\bAgenda\b/i;
-  push @agenda, $1 while $document =~ /^[0-9]+\.\h+(.*)/mgi;
+  return () if $doc !~ /\bAgenda\b/i;
+  $doc = html_to_text($doc) if $mediatype =~ /html|xml/;
+
+  # Store the least indented marker in $delim, if any.
+  #
+  foreach my $d (qr/\d+\)/, qr/\d+\./, qr/\*/, qr/-/, qr/•/, qr/◦/, qr/⁃/) {
+    if ($doc =~ /^(\h*)$d\h/m && length $1 < $i) {$i = length $1; $delim = $d}
+  }
+  return () if !defined $delim;
+  push @agenda, $1 while $doc =~ /^\h*$delim\h+(.*)/mg;
   return @agenda;
 }
 
@@ -362,7 +444,7 @@ sub csswg_agenda_parser($$)
 my (%opts, $ssl, $user, $password, $host, $port, %passwords);
 
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
-getopts('c:n:N:v', \%opts) or die "Try --help\n";
+getopts('c:e:n:N:v', \%opts) or die "Try --help\n";
 die "Usage: $0 [options] [--help] irc[s]://server...\n" if $#ARGV != 0;
 
 # The single argument must be an IRC-URL.
@@ -384,8 +466,6 @@ if (defined $user && !defined $password) {
   print "\n";
 }
 
-%passwords = read_passwords_from_file($opts{'c'}) if defined $opts{'c'};
-
 my $bot = AgendaBot->new(
   server => $host,
   port => $port,
@@ -394,7 +474,8 @@ my $bot = AgendaBot->new(
   password => $password,
   nick => $opts{'n'} // 'agendabot',
   name => $opts{'N'} // 'AgendaBot',
-  passwords => \%passwords // {},
+  passwords_file => $opts{'c'},
+  security_exceptions_uri => $opts{'e'},
   verbose => defined $opts{'v'});
 
 $bot->run();
@@ -408,7 +489,8 @@ agendabot - IRC 'bot that gets a meeting agenda from a URL
 
 =head1 SYNOPSIS
 
-agendabot [-n I<nick>] [-N I<name>] [-c passwordfile] [-v] I<URL>
+agendabot [-n I<nick>] [-N I<name>] [-c I<passwordfile>] [-e I<URL>]
+[-v] I<URL>
 
 =head1 DESCRIPTION
 
@@ -519,6 +601,11 @@ written with a colon instead of a comma: "agendabot: bye")
 Ask AgendaBot to give a brief description of itself. (This may also be
 written with a colon instead of a comma.)
 
+=item agendabot, reload
+
+If Agendabot was started with configuration files (options B<-c> and
+B<-e>), this asks Agendabot to read those files again.
+
 =back
 
 All commands can be normal messages, "/me" messages or private
@@ -580,22 +667,6 @@ results in the following agenda:
 
 =item 3.
 
-In this format, the agenda follows a line "Agenda:" and topics are
-lines that start with an asterisk. E.g.:
-
- Agenda:
- * Payment system
- * AOB?
-
-Any text before, after or in between these lines is ignored. The above
-results in the following agenda:
-
- clear agenda
- agenda+ Payment system
- agenda+ AOB?
-
-=item 4.
-
 This format is simply the same as the output, apart from any redundant
 whitespace. I.e., topics are lines that start with "agenda+". E.g.:
 
@@ -613,11 +684,15 @@ results in the following agenda:
 
 =item 5.
 
-This format has the word "Agenda" somewhere in the text and topics are
-lines that start with a number, a period and a space. E.g.:
+This format has the word "Agenda" somewhere in the text and there may
+be topics and subtopics, which start with start with a "1)", "1.",
+"*", "•", "-", "◦" or "⁃". Only the top level markers, the least indented,
+are copied.
 
  Agenda telcon 20 July
  0. Extra agenda items and other digressions
+    * Jan's items
+    * Scribes
  1. [css-display] Blockifications
  2. [cssom-1] Replace steps of set a CSS declaration
 
@@ -655,6 +730,25 @@ start with "#" are ignored. Other lines cause an error. E.g.:
  # This is a password file
  example.org:443	Member login/passw	joe	secret
  info.example.org:443	Member login/passw	joe	secret
+
+=item B<-e> I<URL>
+
+Normally, Agendabot only uses the password file (option B<-c>) when it
+is asked to retrieve an agenda on a server-local channel, i.e., a
+channel that starts with "&". It will refuse to retrieve
+password-protected agendas on public channels or in private messages.
+The B<-e> option points to a list of exceptions. Each line in the
+indicated file consists of a channel name and a URL prefix, separated
+by a tab. If a URL is asked for on a channel and the channel name and
+the URL match a line in this file, Agendabot will try to retrieve the
+agenda, even if it is password-protected. Empty lines and lines
+that start with "# " are ignored. E.g.:
+
+ # Security exceptions
+ #i18n	https://lists.w3.org/Archives/Member/member-i18n-core/
+
+The file with exceptions may itself be password-protected. Note that
+it is a URL, not a file name. To refer to a local file, use a "file:".
 
 =item B<-v>
 
