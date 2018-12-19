@@ -111,7 +111,7 @@ sub is_exception($$$)
 
 
 # get -- get the contents of a file by its URL
-sub get($$)
+sub get($$$)
 {
   my ($self, $info, $uri) = @_;
   my $channel = $info->{channel};
@@ -246,7 +246,7 @@ sub help($$)
   my $me = $self->nick();		# Our own name
 
   return "I am an instance of " . blessed($self) . " " . VERSION . " (" . HOME
-      . ") I look for \"agenda: URL\" to try and extract an agenda for Zakim. "
+      . "). I look for \"agenda: URL\" to try and extract an agenda for Zakim. "
       . "Invite me to a channel with \"/invite $me\". "
       . "Dismiss me with \"$me, bye\"";
 }
