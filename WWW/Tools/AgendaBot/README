@@ -1,0 +1,14 @@
+agendabot is an IRC 'bot that watches for lines of the form
+
+    agenda: URL
+
+and tries to extract a meeting agenda from the document at that URL.
+It writes the agenda back to the IRC channel in a form understood by
+Zakim[1].
+
+The manual for how to run agendabot is included in the program: See
+the source or run "perldoc agendabot.pl".
+
+The manual for using it from within IRC is in manual.html.
+
+[1] https://www.w3.org/2001/12/zakim-irc-bot.html
