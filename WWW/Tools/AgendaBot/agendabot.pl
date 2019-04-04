@@ -235,6 +235,7 @@ sub said($$)
   if ($text =~ /^agenda\s*:\s*(.+)$/i) {
     return $self->parse_and_print_agenda($info, $1);
   } elsif ($addressed && $text =~ /^bye\s*\.?$/i) {
+    $self->part_channel($channel);
     return undef;			# No reply
   } elsif ($addressed && $text =~ /^reload\s*\.?$/i) {
     return $self->reload() // "configuration files have been reloaded.";
