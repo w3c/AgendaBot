@@ -63,7 +63,12 @@ use utf8;
 use constant HOME => 'https://dev.w3.org/AgendaBot/manual.html';
 use constant VERSION => '0.1';
 
-my @parsers = (			# Subroutines to try and recognize an agenda
+# Subroutines to try and recognize an agenda. The order is important:
+# If several of them find agenda items, the first one to find more
+# than one item is used. (This is because it is more common to find a
+# bulleted list that is not an agenda than, e.g., "topic:" lines that
+# are not agenda items.
+my @parsers = (
   \&bb_agenda_parser,
   \&addison_agenda_parser,
   \&koalie_and_plh_agenda_parser,
@@ -183,11 +188,13 @@ sub parse_and_print_agenda($$$)
   return "$who, sorry, $uri doesn't seem to exist." if $code == 404;
   return "$who, sorry, could not get $uri (code $code)." if !defined $document;
 
-  # Try all parsers in turn to see which one returns the longest agenda.
-  #
+  # Try the parsers in order. Stop as soon as a parser returns an
+  # agenda of two or more items. Otherwise use the first one that
+  # returned one item.
   for my $parser (@parsers) {
     my @h = &$parser($mediatype, $document);
-    @agenda = @h if $#h > $#agenda;
+    @agenda = @h if scalar(@h) > 0;
+    last if scalar(@h) > 1;
   }
   $self->log("Found ".($#agenda+1)." topics in $uri");
   return "$who, sorry, I did not recognize any agenda in $uri" if $#agenda==-1;
