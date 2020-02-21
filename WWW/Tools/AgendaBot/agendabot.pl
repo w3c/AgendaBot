@@ -33,7 +33,7 @@
 # TODO: Automatically part a channel after a certain period of
 # inactivity?
 #
-# TODO: The list of security exception is searched with linear search.
+# TODO: The list of security exceptions is searched with linear search.
 # That's only fine if the list is short.
 #
 # Created: 2018-07-09
@@ -207,7 +207,7 @@ sub parse_and_print_agenda($$$)
 
   return undef;
 }
-  
+
 
 # invited -- handle an invitation to a channel
 sub invited($$)
@@ -349,7 +349,7 @@ sub html_to_text($)
 # The following subroutines are parsers that try to find a meeting
 # agenda in a given text string. Each parser implements a different
 # style of writing an agenda. They return an array in which each item
-# is an agenda topic. An empty arry means no agenda was found.
+# is an agenda topic. An empty array means no agenda was found.
 #
 # The routines are not meant as methods, i.e., they don't expect $self
 # as their first argument.
