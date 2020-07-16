@@ -10,3 +10,8 @@ ReadmeName README
 <Files "README">
 ForceType 'text/plain'
 </Files>
+
+# All files are in UTF-8
+#
+AddDefaultCharset utf-8
+AddCharset utf-8 .html .pl
