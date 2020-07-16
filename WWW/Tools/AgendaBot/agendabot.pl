@@ -60,8 +60,8 @@ use Scalar::Util 'blessed';
 use Term::ReadKey;		# To read a password without echoing
 use utf8;
 
-use constant HOME => 'https://dev.w3.org/AgendaBot/manual.html';
-use constant VERSION => '0.1';
+use constant HOME => 'https://www.w3.org/Tools/AgendaBot/manual.html';
+use constant VERSION => '0.2';
 
 # Subroutines to try and recognize an agenda. The order is important:
 # If several of them find agenda items, the first one to find more
