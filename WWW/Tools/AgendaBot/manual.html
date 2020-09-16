@@ -1,74 +1,259 @@
-<!doctype html>
+<!DOCTYPE HTML SYSTEM "about:legacy-compat">
 <html lang=en-us>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width">
-<title>Agendabot manual</title>
-<link rel=stylesheet type="text/css"
-   href="https://www.w3.org/Guide/guide2006.css">
-<link rel="shortcut icon" href="https://www.w3.org/Icons/WWW/Literature.gif">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width">
+    <title>Agendabot manual</title>
+    <link rel=stylesheet type="text/css"
+      href="https://www.w3.org/Guide/guide2006.css">
+    <link rel="shortcut icon"
+      href="https://www.w3.org/Icons/WWW/Literature.gif">
 
 
-<h1>agendabot</h1>
+    <h1>agendabot</h1>
 
-<p>agendabot is an IRC 'bot that gets a meeting agenda from a URL. It
-is especially useful as a complement to
-the <a href="https://www.w3.org/2001/12/zakim-irc-bot.html"
-class="podlinkurl" >Zakim</a> meeting 'bot, but does not require it.
+    <p>agendabot is an IRC 'bot that gets a meeting agenda from a
+      URL. It is especially useful as a complement to the <a
+      href="https://www.w3.org/2001/12/zakim-irc-bot.html"
+      class="podlinkurl" >Zakim</a> meeting 'bot, but does not require
+      it.
 
 
-<h2>Use from IRC</h2>
+    <h2>Use from IRC</h2>
 
-<p>Assuming agendabot is connected to an IRC server (see the
-documentation in the <a href="agendabot.pl"
->program</a> for how to run it), the steps to using it are as follows:
+    <p>Assuming agendabot is connected to an IRC server (see the
+      documentation in the <a href="agendabot.pl" >program</a> for how
+      to run it), you can control it via commands that typically look
+      like this:
 
-<ol>
- <li>
-  <p>Invite the 'bot to the channel you are meeting on:
+    <pre class=command>agendabot, <var>command…</var>
+agendabot, please, <var>command…</var>
+/me agendabot, <var>command…</var></pre>
 
-  <pre class=command>/invite agendabot</pre>
+    <p>The commands are:
+    <ul>
+      <li><a href="#invite">/invite &ndash; call agendabot to an IRC channel</a>
+      <li><a href="#agenda">agenda: &ndash; read an agenda from a web page</a>
+      <li><a href="#find">find &ndash; find an agenda in the mail archives</a>
+      <li><a href="#">suggest &ndash; list the agenda topics that people suggested by mail</a>
+      <li><a href="#accept">accept &ndash; turn the suggested topic into an agenda</a>
+      <li><a href="#this-is">this is &ndash; associate a mailing list archive</a>
+      <li><a href="#forget">forget &ndash; remove the mailing list archive</a>
+      <li><a href="#status">status &ndash; display the associated list archive</a>
+      <li><a href="#bye">bye &ndash; dismiss agendabot from an IRC channel</a>
+      <li><a href="#help">help &ndash; consult agendabot's manual</a>
+      <li><a href="#reload">reload &ndash; reload configuration files</a>
+    </ul>
 
- <li>
-  <p>Tell the 'bot where the agenda of your meeting is:
+    <h3 id=invite>Invite agendabot</h3>
 
-  <pre class=command>agenda: http://example.org/agendas/2018/13</pre>
+    <p>Invite the 'bot to the channel you are meeting on:
 
-  <p>You can also use a /me instruction:
+    <pre class=command>/invite agendabot</pre>
 
-  <pre class=command>/me agenda: http://example.org/agendas/2018/13</pre>
+    <p>Note that this is a command to the IRC server, not to agendabot
+      (which presumably isn't on the channel yet) and thus does not
+      start with ‘agendabot,’.
 
-  <p>If agendabot succeeds in downloading and parsing the linked
-  document, it will print the agenda to the IRC channel. That could
-  look like, e.g.:
+    <h3 id=agenda>Load agenda</h3>
 
-  <pre>clear agenda
+    <p>Tell the 'bot where the agenda of your meeting is:
+
+    <pre class=command>agenda: http://example.org/agendas/2018/13</pre>
+
+    <p>If agendabot succeeds in downloading and parsing the linked
+      document, it will print the agenda to the IRC channel, with the
+      syntax that the <a href="../../2001/12/zakim-irc-bot.html"
+      >Zakim</a> 'bot understands. That could look like, e.g.:
+
+    <pre class=example>clear agenda
 agenda+ Welcome
 agenda+ Winter topics
 agenda+ AOB</pre>
 
- <li>
-  <p>When the agendabot is no longer needed, dismiss it:
+    <p>‘Agenda:’ is in fact a command for the <a
+      href="https://www.w3.org/2002/03/RRSAgent" >RRSAgent</a> 'bot
+      (which uses it to copy the URL into meeting minutes). That is
+      why it does not start with ‘agendabot,’. To let agendabot look
+      up the agenda while hiding the URL from RRSAgent, you can use a
+      /me instruction or address agendabot directly:
 
-  <pre class=command>agendabot, bye</pre>
-</ol>
+    <pre class=command>/me agenda: http://example.org/agendas/2018/13
+agendabot, agenda: http://example.org/agendas/2018/13</pre>
 
-<p>Agendabot also knows a help command (‘agendabot, help’) and replies
-to it with some info about itself.
+    <h3 id=find>Search for an agenda</h3>
 
-<p>The reload command (‘agendabot, reload’) asks agendabot to reread
-the configuration files it was started with, if any.
+    <p>Instead of pointing agendabot to a specific URL, you can also
+      ask it go search for the URL by itself in the mailing list
+      archives. The command is one of these, or similar:
 
-<h3>Slow?</h3>
+    <pre class=command>agendabot, find agenda
+agendabot, search for the agenda
+agendabot, please, find the agenda.</pre>
 
-<p>Agendabot may appear to be slow. Occasionally that may be because
-the Web server is slow to deliver the requested agenda, but most
-likely you are seeing the so-called flood protection. The 'bot pauses
-before every line, to avoid being kicked off the channel for sending
-too much text in too short a time.
+    <p>Agendabot will search the mail archive in the background (this
+      may take several seconds) and then output something like this:
 
-<p>Just be patient…
+    <pre class=example>agenda: http://example.org/archive/foo/2109.html
+clear agenda
+agenda+ Welcome
+agenda+ Winter topics
+agenda+ AOB</pre>
 
- 
+    <p>unless it fails to find an agenda, in which case it will say
+      so.
+
+    <p>Agendabot normally searches back one week, but you give an
+      explicit number of days or weeks:
+
+    <pre class=command>agendabot, find agenda since 3 weeks
+agendabot, find agenda since 21 days
+agendabot, find agenda in the last 21 days</pre>
+
+    <p>This assumes agendabot already knows which mailing list archive
+      to search in. See <a href="#this-is" >‘Associate a mailing list
+      archive’</a> below.
+
+    <h3 id=suggest>Propose an agenda</h3>
+
+    <p>Agendabot can also look for agenda topics that people suggested
+      on the mailing list and propose an agenda. It looks for mail
+      messages with a subject of ‘agenda+ …some topic…’. To ask
+      agendabot to suggest an agenda, say:
+
+    <pre class=command>agendabot, suggest agenda
+agendabot, propose an agenda.</pre>
+
+    <p>The result might be like this:
+
+    <pre class=example>I found 2 topics:
+1) ftf agenda
+2) discuss issue 27</pre>
+
+    <p>Agendabot will report the topics it found, but not make an
+      agenda in Zakim's format yet. To do that, see the next command,
+      <a href="#accept" >‘accept’</a>.
+
+    <p>Agendabot will search for topics in messages on the mailing
+      list in the last seven days. To search back over a different
+      period, add a number of days or weeks:
+
+    <pre class=command>agendabot, please suggest an agenda since 2 weeks.
+agendabot, suggest an agenda since 14 days
+agendabot, suggest an agenda last 14 days</pre>
+
+    <p>or just:
+
+    <pre class=command>agendabot, since 14 days</pre>
+
+    <p>Like for the <a href="#find" >‘find’</a> command, this assumes
+      agendabot knows in which mailing list to search. See <a
+      href="#this-is" >‘Associate a mailing list archive’</a> below.
+
+    <h3 id=accept>Accept a proposed agenda</h3>
+
+    <p>To accept the agenda topics that agendabot suggested after a <a
+      href="#suggest" >‘suggest’</a> command and turn them into an
+      agenda in the format that Zakim accepts, say:
+
+    <pre class=command>agendabot, accept
+agendabot, confirm agenda
+agendabot, make this agenda</pre>
+
+    <p>You must accept an agenda <em>within one hour</em> after agendabot
+      suggested it.
+
+    <h3 id=this-is>Associate a mailing list archive</h3>
+
+    <p>To tell agendabot in which mailing list archive to search, use
+      a command like the following. Agendabot will remember the
+      mailing list, even when it leaves the channel. More than one
+      mailing list is also possible: Separate them with commas or the
+      word ‘and’. (But the current version 0.3 of agendabot isn't
+      smart and is likely to give up even before reaching the second
+      list.)
+
+    <pre class=command>agendabot, this is abcd
+agendabot, this is https://lists.w3.org/Archives/Public/public-abcd/
+agendabot, this abcd, efgh and ijkl</pre>
+
+    <p>The short form makes agendabot try the following archives until
+      it finds one that exists:
+
+    <ol>
+      <li>https://lists.w3.org/Archives/Public/abcd/
+      <li>https://lists.w3.org/Archives/Member/abcd/
+      <li>https://lists.w3.org/Archives/Team/abcd/
+      <li>https://lists.w3.org/Archives/Public/public-abcd/
+      <li>https://lists.w3.org/Archives/Public/www-abcd/
+      <li>https://lists.w3.org/Archives/Member/member-abcd/
+      <li>https://lists.w3.org/Archives/Member/w3c-abcd/
+      <li>https://lists.w3.org/Archives/Team/team-abcd/
+      <li>https://lists.w3.org/Archives/Team/w3t-abcd/
+    </ol>
+
+    <p>Password-protected archives are only searched if the current
+      channel is a team-only channel or if agendabot's configuration
+      contains an exception for the current channel.
+
+    <h3 id=forget>Remove a mailing list</h3>
+
+    <p>If you want agendabot to forget the mailing list associated
+      with this channel, say something like:
+
+<pre class=command>agendabot, forget mailing list
+agendabot, please, forget the mailing list
+agendabot, forget the list</pre>
+
+    <h3 id=status>Display the mailing list</h3>
+
+    <p>To ask agendabot what mailing list(s) it has associated with
+      this channel, say:
+
+    <pre class=command>agendabot, status?
+agendabot, info?</pre>
+
+    <h3 id=bye>Dismiss agendabot</h3>
+
+    <p>If you want agendabot to leave the channel, dismiss it:
+
+    <pre class=command>agendabot, bye</pre>
+
+    <h3 id=help>Built-in manual</h3>
+
+    <p>Agendabot also knows a help command and replies to it with some
+      info about itself:
+
+    <pre class=command>agendabot, help</pre>
+
+    <p>Or you can get information about a specific command:
+
+    <pre class=command>agendabot, help find
+agendabot, help suggest
+agendabot, help bye</pre>
+
+    <h3 id=reload>Reloading configuration files</h3>
+
+    <p>The reload command,
+
+    <pre class=command>agendabot, reload</pre>
+
+    <p>asks agendabot to reread the configuration files it was started
+      with, if any. (Changing the configuration files while agendabot
+      is running has no effect, until agendabot is restarted or
+      instructed to reload the files.)
+
+    <h3>Slow?</h3>
+
+    <p>Agendabot may appear to be slow. Occasionally that may be
+      because the Web server is slow to deliver the requested agenda,
+      but most likely you are seeing the so-called flood
+      protection. The 'bot pauses before every line, to avoid being
+      kicked off the channel for sending too much text in too short a
+      time.
+
+    <p>Just be patient…
+
+
 <h2>Agenda formats</h2>
 
 <p>When given a URL, agendabot tries to retrieve the document at that
@@ -161,6 +346,9 @@ agenda+ [cssom-1] Replace steps of set a CSS declaration</pre>
 
 <p>This was a 2018 Geek Week project. The idea for agendabot is due to
 Richard Ishida.
+
+      <p>During Geek Week 2020, agendabot was extended to search for
+      agendas or agenda topics on its own in mailing lists.
 
 
 <h2>Author</h2>
