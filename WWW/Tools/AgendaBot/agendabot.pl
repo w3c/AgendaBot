@@ -36,10 +36,26 @@
 # TODO: The list of security exceptions is searched with linear search.
 # That's only fine if the list is short.
 #
+# TODO: Add a way to test the heuristic parsers without connecting to
+# IRC.
+#
+# TODO: The associations of channels with mailing list archives should
+# allow for channels on different IRC networks.
+#
+# TODO: Do more oparations that involve HTTP requests in the
+# background.
+#
+# TODO: More intelligent and configurable $maxtries.
+#
+# TODO: Allow "... in the last week" instead of "in the last 1 weeks".
+#
+# TODO: Skip useless links. Use the anchor text instead of downloading
+# and then looking for the subject.
+#
 # Created: 2018-07-09
 # Author: Bert Bos <bert@w3.org>
 #
-# Copyright © 2018 World Wide Web Consortium, (Massachusetts Institute
+# Copyright © 2018-2020 World Wide Web Consortium, (Massachusetts Institute
 # of Technology, European Research Consortium for Informatics and
 # Mathematics, Keio University, Beihang). All Rights Reserved. This
 # work is distributed under the W3C® Software License
@@ -59,9 +75,15 @@ use POSIX qw(strftime);
 use Scalar::Util 'blessed';
 use Term::ReadKey;		# To read a password without echoing
 use utf8;
+use DateTime;
+use URI;
+use HTML::Entities;
+use POE;			# For OBJECT, ARG0 and ARG1
 
 use constant HOME => 'https://www.w3.org/Tools/AgendaBot/manual.html';
-use constant VERSION => '0.2';
+use constant VERSION => '0.3';
+use constant LIMIT => 20;	# Max # of downloads per day of archives
+
 
 # Subroutines to try and recognize an agenda. The order is important:
 # If several of them find agenda items, the first one to find more
@@ -82,6 +104,7 @@ sub init($)
   my $errmsg;
 
   $errmsg = $self->reload() and die "$errmsg\n";
+  $self->{topics} = {};
   return 1;
 }
 
@@ -94,6 +117,7 @@ sub reload($)
 
   if (($errmsg = $self->read_passwords_file())) {$self->log($errmsg);}
   elsif (($errmsg = $self->read_security_exceptions())) {$self->log($errmsg);}
+  elsif (($errmsg = $self->read_mailing_lists())) {$self->log($errmsg);}
   return $errmsg;
 }
 
@@ -201,11 +225,351 @@ sub parse_and_print_agenda($$$)
 
   # Print the agenda in Zakim's format.
   #
-  $self->say({channel => $channel, who => $who, body => "clear agenda"});
-  $self->say({channel => $channel, who => $who, body => "agenda+ " . $_})
+  $self->say({channel => $channel, body => "clear agenda"});
+  $self->say({channel => $channel, body => "agenda+ " . $_})
       foreach (@agenda);
 
   return undef;
+}
+
+
+# get_subject_and_date -- get the subject and date from an archived message
+sub get_subject_and_date($$)
+{
+  my ($self, $doc) = @_;
+  my ($subject, $date) = ("", time); # Default is no subject and current time
+
+  $subject = decode_entities($1)
+      if $doc =~ /<meta name="Subject" content="(.*?)"/;
+  # TODO: handle errors in new().
+  $date = DateTime->new(year => $1, month => $2, day => $3)->epoch
+      if $doc =~ /<meta name="Date" content="(\d+)-(\d\d)-(\d\d)/;
+
+  return ($subject, $date);
+}
+
+
+# find_links -- return a list of all links in a document under a given base
+sub find_links()
+{
+  my ($self, $doc, $base) = @_;
+  my @urls;
+
+  $doc =~ s/<!--.*?-->//g;	# Remove comments
+  $base =~ s/[^\/]+$//;		# Remove everything after the last "/"
+  while ($doc =~ /<a\b[^>]+\bhref\s*=\s*['"]([^'"]*)/g) {
+    my $url = URI->new_abs($1, $base)->canonical->as_string;
+    $url =~ s/#.*//;		# Remove fragments
+    # Only keep URLs with $base as prefix, that end in "/" or ".html",
+    # and that do not end in "/thread.html", "/author.html" or
+    # "/subject.html".
+    push @urls, $url if $url =~ /^\Q$base\E/ && $url =~ /(?:\.html|\/)$/ &&
+	$url !~ /\/(?:thread|author|subject)\.html$/;
+  }
+  return @urls;
+}
+
+
+# find_agenda_process -- find an agenda in recent email (background process)
+sub find_agenda_process($$$$$)
+{
+  my ($body, $self, $info, $lists, $period) = @_;
+  my @urls = split(/ /, $lists);
+  my $channel = $info->{channel};
+  my (@agenda, $url, $oldest, %seen);
+  my ($tries, $maxtries) = (0, LIMIT); # Max downloads if $period is "1 day"
+
+  if ($period =~ /(\d+) day/) {$maxtries *= $1; $oldest = time - 60*60*24*$1;}
+  elsif ($period =~ /(\d+) week/) {$maxtries *= 7*$1; $oldest = 60*60*24*7*$1;}
+  else {print STDERR "Bug! find_agenda_process(... \"$period\")\n"; return;}
+
+  $seen{$_} = 1 foreach @urls;
+  while (scalar(@agenda) < 2 && @urls && $tries++ < $maxtries) {
+    $url = shift @urls;
+    my ($code, $mediatype, $document) = $self->get($info, $url);
+    next if $code != 200;
+    my ($subject, $date) = $self->get_subject_and_date($document);
+    next if $date < $oldest;
+    # Add all links from $document that are under $url and not already seen.
+    unshift @urls, grep {!$seen{$_}++} $self->find_links($document, $url);
+    next if $subject !~ /\bagenda\b/i;
+    for my $parser (@parsers) {
+      my @h = &$parser($mediatype, $document);
+      if (scalar(@h) > 1) {@agenda = @h; last;}
+    }
+  }
+
+  if (scalar(@agenda) > 1) {
+    print STDERR "Found agenda with ".scalar(@agenda)." topics for $channel\n";
+    print "$channel\t(\t$url\n";
+    print "$channel\t-\t$_\n" foreach @agenda;
+  # } elsif ($tries >= $maxtries) {
+  #   print "$channel\t....
+  } else {
+    print STDERR "Found no agenda for $channel in $period\n";
+    print "$channel\t)\n";
+  }
+}
+
+
+# handle_find_agenda_results -- handle lines printed by find_agenda_process
+sub handle_find_agenda_results
+{
+  my ($self, $body, $wheel_id) = @_[OBJECT, ARG0, ARG1];
+
+  # Lines are of the form "CHANNEL<tab>C..." when C = "(", "-" or ")".
+  chomp $body;
+  if ($body =~ /^([^\t]+)\t\(\t(.*)/) {
+    $self->say({channel => $1, body => "agenda: $2"});
+    $self->say({channel => $1, body => "clear agenda"});
+  } elsif ($body =~ /^([^\t]+)\t-\t(.*)/) {
+    $self->say({channel => $1, body => "agenda+ $2"});
+  } elsif ($body =~ /^([^\t]+)\t\)/) {
+    $self->say({channel=>$1, body=>"Sorry, I did not find an agenda."});
+  }
+}
+
+
+# find_agenda -- look for an agenda in recent mail messages and parse it
+sub find_agenda($$$)
+{
+  my ($self, $info, $period) = @_;
+  my $channel = $info->{channel};	# "#channel" or "msg"
+  my $lists = $self->{mailing_lists}->{$channel};
+  my $me = $self->nick();		# Our own name
+
+  return "sorry, I don't know which mailing list is associated with this "
+      . "channel. Try \"$me, help this is\"." if !defined $lists;
+
+  # If there is already a process running, kill it.
+  $self->{find_agenda_process}->kill() if defined $self->{find_agenda_process};
+
+  # Start a background process.
+  $self->{find_agenda_process} =
+      $self->forkit({run => \&find_agenda_process,
+		     handler => "handle_find_agenda_results",
+		     channel => $channel,
+		     arguments => [$self, $info, $lists, $period]});
+
+  $self->log("Looking for an agenda for $channel in the background");
+  return "OK. This may take a minute...";
+}
+
+
+# find_topics_process -- look for agenda+ in recent mail subjects
+sub find_topics_process($$$$$)
+{
+  my ($body, $self, $info, $lists, $period) = @_;
+  my @urls = split(/ /, $lists);
+  my $channel = $info->{channel};
+  my (@agenda, $url, $oldest, %seen);
+  my ($tries, $maxtries) = (0, LIMIT); # Max downloads if $period is "1 day"
+
+  if ($period =~ /(\d+) day/) {$maxtries *= $1; $oldest = time - 60*60*24*$1;}
+  elsif ($period =~ /(\d+) week/) {$maxtries *= 7*$1; $oldest = 60*60*24*7*$1;}
+  else {print STDERR "Bug! find_topics_process(... \"$period\")\n"; return;}
+
+  print "$channel\t(\n";	# Signal the start of the array
+  $seen{$_} = 1 foreach @urls;
+  while (@urls && $tries++ < $maxtries) {
+    $url = shift @urls;
+    my ($code, $mediatype, $document) = $self->get($info, $url);
+    next if $code != 200;
+    my ($subject, $date) = $self->get_subject_and_date($document);
+    next if $date < $oldest;
+    # Add all links from $document that are under $url and not already seen.
+    unshift @urls, grep {!$seen{$_}++} $self->find_links($document, $url);
+    print "$channel\t-\t$1\n"
+	if $subject !~ /^Re:/i && $subject =~ /\bagenda\+\s*(.*)/i;
+  }
+  print "$channel\t)\n";	# Signal the end of the array
+}
+
+
+# handle_find_topics_results -- handle lines printed by find_topics_process
+sub handle_find_topics_results
+{
+  my ($self, $body, $wheel_id) = @_[OBJECT, ARG0, ARG1];
+  my ($n, $channel);
+
+  # Lines are of the form "CHANNEL<tab>C..." where C is "(", "-" or ")"
+  chomp $body;
+  if ($body =~ /^([^\t]+)\t\(/) { # Signals the start of the array
+    $self->{topics}->{$1} = [];	  # Initalize the list of topics
+  } elsif ($body =~ /^([^\t]+)\t-\t(.*)/) {
+    push @{$self->{topics}->{$1}}, $2;
+  } elsif ($body =~ /^([^\t]+)\t\)/) { # Signals the end of the array
+    $channel = $1;
+    $self->{topics_time}->{$channel} = time; # Add a time stamp
+    $n = scalar(@{$self->{topics}->{$channel}});
+    if ($n == 0) {
+      delete $self->{topics}->{$channel};
+      $self->say({channel => $channel,
+		  body => "Sorry, I did not find any message with "
+		      . "\"agenda+\" in the subject."});
+    } elsif ($n == 1) {
+      $self->say({channel => $channel, body => "I found 1 topic:"});
+      $self->say({channel => $channel,
+		  body => "1) ".$self->{topics}->{$channel}->[0]});
+    } else {
+      $self->say({channel => $channel, body => "I found $n topics:"});
+      my $i = 1; $self->say({channel => $channel, body => $i++ . ") $_"})
+		     foreach @{$self->{topics}->{$channel}};
+    }
+  }
+}
+
+
+# find_topics -- look for agenda+ in recent mail subjects
+sub find_topics($$$)
+{
+  my ($self, $info, $period) = @_;
+  my $channel = $info->{channel};	# "#channel" or "msg"
+  my $lists = $self->{mailing_lists}->{$channel};
+  my $me = $self->nick();		# Our own name
+
+  # return "sorry, not yet implemented.";
+
+  return "sorry, I don't know which mailing list is associated with this "
+      . "channel. Try \"$me, help this is\"." if !defined $lists;
+
+  # If there is a process running for $channel, kill it.
+  $self->{find_topics_process}->kill() if defined $self->{find_topics_process};
+
+  # Start a background process.
+  $self->{find_topics_process} =
+      $self->forkit({run => \&find_topics_process,
+		     handler => "handle_find_topics_results",
+		     channel => $channel,
+		     arguments => [$self, $info, $lists, $period]});
+
+  $self->log("Looking for agenda topics for $channel in the background");
+  return "OK. This may take a minute...";
+}
+
+
+# accept_topics -- turn the found topics into an agenda
+sub accept_topics($$)
+{
+  my ($self, $channel) = @_;
+  my $me = $self->nick();		# Our own name
+
+  return "Sorry, I haven't found any suggested agenda topics. "
+      . "Please use \"$me, suggest agenda\" if you want me to look for some."
+      if !defined $self->{topics}->{$channel};
+  return "Sorry, I haven't looked for topics in the last hour. "
+      . "Please use \"$me, suggest agenda\" if you want me to look for some."
+      if $self->{topics_time} < time - 3600;
+
+  $self->say({channel => $channel, body => "clear agenda"});
+  $self->say({channel => $channel, body => "agenda+ $_"})
+      foreach @{$self->{topics}->{$channel}};
+  return undef;
+}
+
+
+sub find_mailing_list_archive($$$)
+{
+  my ($self, $info, $list_name) = @_;
+
+  foreach my $base (("https://lists.w3.org/Archives/Public/",
+		     "https://lists.w3.org/Archives/Member/",
+		     "https://lists.w3.org/Archives/Team/",
+		     "https://lists.w3.org/Archives/Public/public-",
+		     "https://lists.w3.org/Archives/Public/www-",
+		     "https://lists.w3.org/Archives/Member/member-",
+		     "https://lists.w3.org/Archives/Member/w3c-",
+		     "https://lists.w3.org/Archives/Team/team-",
+		     "https://lists.w3.org/Archives/Team/w3t-")) {
+    my $url = "$base$list_name/";
+    my ($code, $mediatype, $document) = $self->get($info, $url);
+    return $url if $code == 200; # TODO: check that type is HTML
+  }
+
+  return $list_name;		# Return the input if no archive found
+}
+
+
+# write_mailing_list_associations -- write the associations to file
+sub write_mailing_list_associations($)
+{
+  my ($self) = @_;
+
+  # Try to write the associations to file.
+  #
+  my %assoc = %{$self->{mailing_lists}};
+  open my $fh, ">", $self->{mailing_lists_file} or return 0;
+  print $fh $_, "\t", $assoc{$_}, "\n" foreach keys %assoc;
+  close $fh;
+  return 1;
+}
+
+
+# associate_mailing_lists -- define the mail archives to search in
+sub associate_mailing_lists($$$)
+{
+  my ($self, $info, $channel, $lists) = @_;
+  my ($urls, $sep) = ("", "");
+
+  # Split the list of mailing lists and, if they are not already URLs,
+  # try to find their URLs. Concatenate the URLs. If no URL could be
+  # found for one of the mailing list names, return an error message.
+  #
+  foreach my $x (split(/\s*,\*|\s+and\s+/i, $lists)) {
+    $x = $self->find_mailing_list_archive($info, $x) if $x !~ /^https?:\/\//i;
+    return "I could not find (or not read) the archive for $x."
+	if $x !~ /^https?:\/\//i;
+    $urls .= $sep . $x;
+    $sep = " ";
+  }
+
+  # Store the associations.
+  #
+  $self->{mailing_lists}->{$channel} = $urls;
+  $self->log("New association: $channel -> $urls");
+
+  # Try to write the associations to file.
+  #
+  my $result = $self->write_mailing_list_associations;
+  $self->log("Writing to $self->{mailing_lists_file} failed") if !$result;
+  return "I could not write a file. The new mailing list association "
+      . "will be lost when I am restarted. Sorry." if !$result;
+  return "OK, using $urls";
+}
+
+
+# forget_mailing_lists -- remove the mail archives to search in
+sub forget_mailing_lists($$)
+{
+  my ($self, $channel) = @_;
+  my $urls = $self->{mailing_lists}->{$channel};
+
+  return "I already have no mailing list for this channel." if !defined $urls;
+
+  # Remove the association.
+  #
+  delete $self->{mailing_lists}->{$channel};
+  $self->log("Removed associations for $channel");
+
+  # Write current associations to file.
+  #
+  my $result = $self->write_mailing_list_associations;
+  $self->log("Writing to $self->{mailing_lists_file} failed") if !$result;
+  return "I could not write a file. The new mailing list association "
+      . "will be lost when I am restarted. Sorry." if !$result;
+  return "OK, I removed the mailing list" . ($urls =~ / / ? "s." : ".");
+}
+
+
+# status -- display the associated mailing list(s)
+sub status($$)
+{
+  my ($self, $channel) = @_;
+  my $urls = $self->{mailing_lists}->{$channel};
+
+  return "I know no mailing list for this channel." if !defined $urls;
+  return "the mailing list for this channel is $urls" if $urls !~ / /;
+  return "the mailing lists for this channel are " . ($urls =~ s/ /, /gr );
 }
 
 
@@ -232,18 +596,58 @@ sub said($$)
   my $me = $self->nick();		# Our own name
   my $addressed = $info->{address};	# Defined if we're personally addressed
 
-  if ($text =~ /^agenda\s*:\s*(.+)$/i) {
-    return $self->parse_and_print_agenda($info, $1);
-  } elsif ($addressed && $text =~ /^bye\s*\.?$/i) {
-    $self->part_channel($channel);
-    return undef;			# No reply
-  } elsif ($addressed && $text =~ /^reload\s*\.?$/i) {
-    return $self->reload() // "configuration files have been reloaded.";
-  } elsif ($addressed) {
-    return "sorry, I don't understand \"$text\". Try \"$me, help\".";
-  } else {
-    return $self->SUPER::said($info);
-  }
+  # "Agenda:" does not need to be addressed to us.
+  return $self->parse_and_print_agenda($info, $1)
+      if $text =~ /^agenda\s*:\s*(.+)$/i;
+
+  # We don't handle other text unless it is addressed to us.
+  return $self->SUPER::said($info)
+      if (!$addressed);
+
+  # Remove the optional initial "please" and final period.
+  $text =~ s/^please\s*,?\s*//i;
+  $text =~ s/\s*\.\s*$//;
+
+  return $self->part_channel($channel), undef # undef -> no reply
+      if $text =~ /^bye$/i;
+
+  return $self->reload() // "configuration files have been reloaded."
+      if $text =~ /^reload$/i;
+
+  return $self->find_agenda($info, $1 // "7 days")
+      if $text =~ /^(?:find|search(?:\s+for)?|look\s+for)\s+
+      	           (?:an\s+|the\s+)?agenda
+		   (?:\s+(?:since|(?:in\s+)(?:the\s+)?last)\s+
+		    (\d+\s+days?|\d+\s+weeks?))?$/xi;
+
+  return $self->find_topics($info, $1 // "7 days")
+      if $text =~ /^(?:suggest|propose)\s+
+      	       	   (?:an\s+|the\s+)?(?:agenda|agenda\s+topics|topics)
+		   (?:\s+(?:since|(?:in\s+)(?:the\s+)?last)\s+
+		    (\d+\s+days?|\d+\s+weeks?))?$/xi ||
+         $text =~ /^(?:since|(?:in\s+)?(?:the\s+)?last)\s+
+	       	   (\d+\s+days?|\d+\s+weeks?)$/xi;
+
+  return $self->accept_topics($channel)
+      if $text =~ /^(?:accept|confirm)(?:\s+the|\s+this)?(?:agenda)?/i;
+
+  return $self->associate_mailing_lists($info, $channel, $1)
+      if $text =~ /^this\s+is\s+
+      	       	   ([^\s,]+(?:(?:\s*,\s*(?:and\s+)?|\s+and\s+)[^\s,])*)$/xi;
+
+  return $self->forget_mailing_lists($channel)
+      if $text =~ /^forget(?:\s+(?:the\s+)?(?:mailing\s+)?lists?)?$/i;
+
+  return $self->status($channel)
+      if $text =~ /^(?:status|info)\s*\??$/i;
+
+  return $self->help($info)
+      if $text =~ /^help/i;
+
+  return "Sorry, I don't understand \"$text\". Try \"help\"."
+      if $channel eq 'msg';	# Omit "$me" in a private channel.
+
+  return "sorry, I don't understand \"$text\". Try \"$me, help\".";
 }
 
 
@@ -252,11 +656,71 @@ sub help($$)
 {
   my ($self, $info) = @_;
   my $me = $self->nick();		# Our own name
+  my $text = $info->{body};		# What Nick said
 
-  return "I am an instance of " . blessed($self) . " " . VERSION . " (" . HOME
-      . "). I look for \"agenda: URL\" to try and extract an agenda for Zakim. "
-      . "Invite me to a channel with \"/invite $me\". "
-      . "Dismiss me with \"$me, bye\"";
+  $text =~ s/^help\s*//;
+
+  return "you can invite me to a channel with \"/invite $me\"."
+      if $text =~ /^\/?invite/;
+
+  return "if you say \"agenda: some-URL\", I will try and extract an "
+      . "agenda for Zakim from that URL."
+      if $text =~ /^agenda:?/i;
+
+  return "if you say \"$me, find agenda\", I will scan the mailing list "
+      . "for a message that contains an agenda. I also understand "
+      . "\"search\", \"search for\" and \"look for\". If I should "
+      . "look for messages older than 1 week, add the number of days "
+      . "or weeks, e.g.: \"since 2 weeks\", \"in the last 10 days\"."
+      if $text =~ /^find|search|look/i;
+
+  return "if you say \"$me, suggest agenda\" (or \"$me, propose topics\" "
+      . "or some mix of that), I will scan the mailing list for "
+      . "messages with a subject of \"agenda+ ...topic\" and present "
+      . "a list. If I need to look also for messages older than 1 week, "
+      . "add the number of days or weeks, e.g.: \"since 3 weeks\", "
+      . "\"in the last 21 days\". To turn my list into an agenda, say "
+      . "\"$me, accept\". (See \"$me, help accept\".)"
+      if $text =~ /^suggest|propose/i;
+
+  return "if you say \"$me, accept\" (or \"confirm\" or \"accept agenda\" "
+      . "or \"confirm this agenda\"), I will print the agenda topics "
+      . "that I found when you said \"$me, suggest agenda\" in the form "
+      . "of an agenda that Zakim understands. Note: This only works "
+      . "if I suggested topics less than an hour ago."
+      if $text =~ /^accept|confirm/i;
+
+  return "if you say \"$me, this is xyz\", I will remember the "
+      . "mailing list \"xyz\" (or \"public-xyz\", \"www-xyz\", "
+      . "\"member-xyz\", \"w3c-xyz\" or \"team-xyz\" or "
+      . "\"w3t-xyz\", whichever "
+      . "I can find and read) and use it to search for agendas. "
+      . "You can also give the URL: \"$me this "
+      . "is https://lists.w3.org/Archives/Public/public-xyz/\". "
+      . "Multiple lists is also possible. Just separate the names "
+      . "or URLs with commas or with the word \"and\"."
+      if $text =~ /^this\s+is/i;
+
+  return "if you say \"$me, forget mailing list\" (or \"forget the "
+      . "mailing lists\"), I will no longer use any mailing lists to "
+      . "search for agendas. The \"find\" and \"suggest\" commands "
+      . "will no longer work (but \"agenda:\" still does). Use the "
+      . "\"this is\" command to associate a new mailing list."
+      if $text =~ /^forget/i;
+
+  return "if you say \$me, reload\", I will re-read my configuration "
+      . "files. This is only useful if they changed, of course."
+      if $text =~ /^reload/i;
+
+  return "if you say \"$me, bye\", I will leave this channel. "
+      . "I will continue to remember any associated mailing lists and "
+      . "suggested agenda topics, in case you /invite me back."
+      if $text =~ /^bye/i;
+
+  return "I am an instance of " . blessed($self) . " " . VERSION . ". "
+      . "For detailed help, type \"help COMMAND\", where COMMAND is "
+      . "one of invite, agenda, find, suggest, accept, "
+      . "this is, forget, reload or bye. Or go to " . HOME;
 }
 
 
@@ -338,11 +802,45 @@ sub read_security_exceptions($)
 }
 
 
+# read_mailing_lists -- read the associations channel -> mailing lists
+sub read_mailing_lists($)
+{
+  my ($self) = @_;
+  my $path = $self->{mailing_lists_file};
+  my ($fh, %assoc);
+
+  return "Bug: No file defined for storing mailing list associations."
+      if !defined $path;
+
+  # Open $path, if it exists. Each line consists of a channel name, a
+  # tab and a space-separated list of URLs. Empty lines are
+  # ignored. Lines that consist of a "#" that is not followed by a
+  # letter or digit are comment lines and are also ignored.
+  #
+  if (open $fh, "<", $path) {
+    while (<$fh>) {
+      chomp;
+      if (/^$/ || /^#$/ || /^#[^a-zA-Z0-9_-]/) {
+	next;
+      } elsif (/^([#&][^\t]+)\t(.*)$/) {
+	$assoc{$1} = $2;
+      } else {
+	return "$path:$.: Syntax error: line does not have a channel name and URL(s)."
+      }
+    }
+    close $fh;
+  }
+  $self->{mailing_lists} = \%assoc;
+  $self->log("Restore association: $_ -> " . $self->{mailing_lists}->{$_})
+      foreach (keys %{$self->{mailing_lists}});
+  return undef;			# No errors
+}
+
+
 # html_to_text -- remove tags and expand charactet entities
 sub html_to_text($)
 {
-  return $_[0] =~ s/<[^>]*>//gr =~ s/&lt;/</gr =~ s/&gt;/>/gr =~ s/&quot;/"/gr
-    =~ s/&apos;/'/gr =~ s/&amp;/&/gr;
+  return decode_entities($_[0] =~ s/<[^>]*>//gr);
 }
 
 
@@ -452,7 +950,7 @@ sub two_level_agenda_parser($$)
 my (%opts, $ssl, $user, $password, $host, $port, %passwords);
 
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
-getopts('c:e:n:N:v', \%opts) or die "Try --help\n";
+getopts('c:e:m:n:N:v', \%opts) or die "Try --help\n";
 die "Usage: $0 [options] [--help] irc[s]://server...\n" if $#ARGV != 0;
 
 # The single argument must be an IRC-URL.
@@ -484,7 +982,8 @@ my $bot = AgendaBot->new(
   name => $opts{'N'} // 'AgendaBot',
   passwords_file => $opts{'c'},
   security_exceptions_uri => $opts{'e'},
-  verbose => defined $opts{'v'});
+  verbose => defined $opts{'v'},
+  mailing_lists_file => $opts{'m'} // 'agendabot.assoc');
 
 $bot->run();
 
@@ -498,7 +997,7 @@ agendabot - IRC 'bot that gets a meeting agenda from a URL
 =head1 SYNOPSIS
 
 agendabot [-n I<nick>] [-N I<name>] [-c I<passwordfile>] [-e I<URL>]
-[-v] I<URL>
+[-m I<mailing-list-file>] [-v] I<URL>
 
 =head1 DESCRIPTION
 
@@ -584,40 +1083,77 @@ as "%3a", "/" as "%2f", etc.
 
 =head2 IRC commands
 
-The commands Agendabot listens for on IRC are:
+For more details about the commands Agendabot understands on IRC, see
+the manual, or use the "agendabot, help" command on IRC. Here is a
+brief list:
 
 =over
 
-=item agenda: I<URL>
+=item "/invite agendabot"
+
+When AgendaBot is invited to a channel, it tries to join that channel.
+
+=item" agenda: I<URL>"
 
 Makes agendabot try and retrieve the URL, parse the result to try and
 find an agenda, and print that agenda on IRC in the right format for
 Zakim 'bot. AgendaBot prints an error message if it fails to find an
 agenda.
 
-=item /invite agendabot
+=item "agendabot, bye"
 
-When AgendaBot is invited to a channel, it tries to join that channel.
+Tells AgendaBot to leave the current channel.
 
-=item agendabot, bye
+=item "agendabot, help" and "agendabot help I<command>"
 
-Tells AgendaBot to leave the current channel. (This may also be
-written with a colon instead of a comma: "agendabot: bye")
+Ask AgendaBot to give a brief description of itself. To get
+information about a specific command, such as "find", type "agendabot,
+help find".
 
-=item agendabot, help
-
-Ask AgendaBot to give a brief description of itself. (This may also be
-written with a colon instead of a comma.)
-
-=item agendabot, reload
+=item "agendabot, reload"
 
 If Agendabot was started with configuration files (options B<-c> and
 B<-e>), this asks Agendabot to read those files again.
 
+=item "agendabot, find agenda"
+
+Ask Agendabot to look in the mail archives for an agenda. It looks
+back one week. To search other periods, add a number of days or weeks,
+e.g.: "agendabot, find agenda since 10 days".
+
+=item "agendabot, suggest agenda"
+
+Ask Agendabot to look in the mail archives for messages that have
+"agenda+" in their subject. It looks for message less than one week
+old. To search other periods, add a number of days or weeks, e.g.,
+"agendabot, suggest agenda since 2 weeks".
+
+=item "agendabot, accept"
+
+Ask Agendabot to turn the suggested agenda into an actual agenda.
+
+=item "agendabot, this is I<list>" and "agendabot, this is I<URL>"
+
+Tell Agendabot in what mailing list to search for agendas. The short
+form, e.g., "agendabot, this is style" or "agendabot, this is w3t",
+causes Agendabot to guess the URL. In this case, it will find
+".../Public/www-style/" and ".../Team/w3t". (It may not have access to
+password-protected archives, see the B<-c> option.)
+
+=item "agendabot, forget"
+
+Ask Agendabot to forget the mailing list for this channel. Subsequent
+"find" and "suggest" commands will fail, until a new mailing list is
+associated with "this is".
+
+=item "agendabot, status"
+
+Ask Agendabot to display the URL of the mailing list where it searches
+for agendas.
+
 =back
 
-All commands can be normal messages, "/me" messages or private
-messages ("/msg agendabot").
+All commands can be normal messages or "/me" messages.
 
 Once started, the bot doesn't stop (unless a serious error occurs).
 Stop it with Control-C or the kill(1) command.
@@ -758,6 +1294,21 @@ that start with "# " are ignored. E.g.:
 The file with exceptions may itself be password-protected. Note that
 it is a URL, not a file name. To refer to a local file, use a "file:".
 
+=item B<-m> I<mailing-lists-file>
+
+When IRC channels are associated with mailing lists (so that Agendabot
+knows which archives to search for agendas), those associations are
+stored in a file. This way, when Agendabot is restarted, it still
+knows the associations. This option specifies the file. The default is
+agendabot.assoc.
+
+The file contains lines consisting of a channel name, a tab and a
+space-separated list of URLs. Empty lines are ignored and lines that
+start with "#" but not with a valid channel name are considered
+comments and are also ignored. But note that the file will be
+overwritten and the comments will be lost as soon as Agendabot
+receives a new mailing list association on IRC.
+
 =item B<-v>
 
 Be verbose. Makes the 'bot print a log to standard error output of
@@ -787,6 +1338,7 @@ Bert Bos E<lt>bert@w3.org>
 
 =head1 SEE ALSO
 
+L<Agendabot manual|https://www.w3.org/Tools/AgendaBot/manual.html>,
 L<Zakim|https://www.w3.org/2001/12/zakim-irc-bot.html>,
 L<RRSAgent|https://www.w3.org/2002/03/RRSAgent>,
 L<scribe.perl|https://dev.w3.org/2002/scribe2/scribedoc>
