@@ -708,6 +708,11 @@ sub help($$)
       . "\"this is\" command to associate a new mailing list."
       if $text =~ /^forget/i;
 
+  return "if you say \"$me, status?\" (or \"$me, info\"), I will "
+      . "show the URL of the mailing list archive where I look "
+      . "for agendas."
+      if $text =~ /^status|info/i;
+
   return "if you say \$me, reload\", I will re-read my configuration "
       . "files. This is only useful if they changed, of course."
       if $text =~ /^reload/i;
@@ -720,7 +725,7 @@ sub help($$)
   return "I am an instance of " . blessed($self) . " " . VERSION . ". "
       . "For detailed help, type \"help COMMAND\", where COMMAND is "
       . "one of invite, agenda, find, suggest, accept, "
-      . "this is, forget, reload or bye. Or go to " . HOME;
+      . "this is, forget, status, reload or bye. Or go to " . HOME;
 }
 
 
