@@ -52,6 +52,9 @@
 # TODO: Skip useless links. Use the anchor text instead of downloading
 # and then looking for the subject.
 #
+# TODO: Automatically start looking for an agenda when Zakim joins the
+# channel?
+#
 # Created: 2018-07-09
 # Author: Bert Bos <bert@w3.org>
 #
@@ -80,7 +83,8 @@ use URI;
 use HTML::Entities;
 use POE;			# For OBJECT, ARG0 and ARG1
 
-use constant HOME => 'https://www.w3.org/Tools/AgendaBot/manual.html';
+use constant HOME => 'https://www.w3.org/Tools/AgendaBot';
+use constant MANUAL => 'https://www.w3.org/Tools/AgendaBot/manual.html';
 use constant VERSION => '0.3';
 use constant LIMIT => 20;	# Max # of downloads per day of archives
 
@@ -725,7 +729,7 @@ sub help($$)
   return "I am an instance of " . blessed($self) . " " . VERSION . ". "
       . "For detailed help, type \"help COMMAND\", where COMMAND is "
       . "one of invite, agenda, find, suggest, accept, "
-      . "this is, forget, status, reload or bye. Or go to " . HOME;
+      . "this is, forget, status, reload or bye. Or go to " . MANUAL;
 }
 
 
@@ -984,7 +988,7 @@ my $bot = AgendaBot->new(
   username => $user,
   password => $password,
   nick => $opts{'n'} // 'agendabot',
-  name => $opts{'N'} // 'AgendaBot',
+  name => $opts{'N'} // 'AgendaBot '.VERSION.' '.HOME,
   passwords_file => $opts{'c'},
   security_exceptions_uri => $opts{'e'},
   verbose => defined $opts{'v'},
