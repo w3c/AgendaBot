@@ -1,4 +1,4 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 #
 # This IRC 'bot looks for lines of the form "agenda: URL" and tries to
 # find a meeting agenda at that URL. If it succeeds, it prints the
@@ -143,10 +143,10 @@ sub is_exception($$$)
 }
 
 
-# get -- get the contents of a file by its URL
-sub get($$$)
+# request -- send a request to a server and read the response
+sub request($$$$)
 {
-  my ($self, $info, $uri) = @_;
+  my ($self, $method, $info, $uri) = @_;
   my $channel = $info->{channel};
   my ($ua, $res, $realm, $user, $password, $user_pass, $challenge, %passwords);
 
@@ -156,7 +156,8 @@ sub get($$$)
   $ua->timeout(10);
   $ua->env_proxy;
 
-  $res = $ua->get($uri);
+  $res = $method eq "GET" ? $ua->get($uri) :
+      $method eq "HEAD" ? $ua->head($uri) : return (400, undef, undef);
 
   if ($res->code == 401) {	# The resource requires authentication
 
@@ -188,7 +189,8 @@ sub get($$$)
     # Hand the login and password to $ua and try to get the URI again.
     #
     $ua->credentials($res->base->host_port, $realm, $user, $password);
-    $res = $ua->get($uri);
+    $res = $method eq "GET" ? $ua->get($uri) :
+	$method eq "HEAD" ? $ua->head($uri) : return (400, undef, undef);
   }
 
   $self->log("Code ".$res->code." on $uri");
@@ -196,6 +198,22 @@ sub get($$$)
   return $res->is_success
       ? ($res->code, $res->content_type, $res->decoded_content())
       : ($res->code, undef, undef);
+}
+
+
+# get -- get the contents of a file by its URL
+sub get($$$)
+{
+  my ($self, $info, $uri) = @_;
+  return $self->request('GET', $info, $uri);
+}
+
+
+# head -- get the content type of a file by its URL
+sub head($$$)
+{
+  my ($self, $info, $uri) = @_;
+  return $self->request('HEAD', $info, $uri);
 }
 
 
@@ -486,7 +504,7 @@ sub find_mailing_list_archive($$$)
 		     "https://lists.w3.org/Archives/Team/team-",
 		     "https://lists.w3.org/Archives/Team/w3t-")) {
     my $url = "$base$list_name/";
-    my ($code, $mediatype, $document) = $self->get($info, $url);
+    my ($code, $mediatype, $document) = $self->head($info, $url);
     return $url if $code == 200; # TODO: check that type is HTML
   }
 
