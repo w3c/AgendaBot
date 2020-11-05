@@ -108,6 +108,7 @@ sub init($)
   my $errmsg;
 
   $errmsg = $self->reload() and die "$errmsg\n";
+  $errmsg = $self->read_rejoin_list() and die "$errmsg\n";
   $self->{topics} = {};
   return 1;
 }
@@ -522,7 +523,6 @@ sub write_mailing_list_associations($)
   my %assoc = %{$self->{mailing_lists}};
   open my $fh, ">", $self->{mailing_lists_file} or return 0;
   print $fh $_, "\t", $assoc{$_}, "\n" foreach keys %assoc;
-  close $fh;
   return 1;
 }
 
@@ -605,6 +605,37 @@ sub invited($$)
 
   $self->log("Invited by $who ($raw_nick) to $channel");
   $self->join_channel($channel);
+  $self->remember_channel($channel);
+}
+
+
+# remember_channel -- update the list of joined channels on disk, if needed
+sub remember_channel($$)
+{
+  my ($self, $channel) = @_;
+
+  return if !$self->{rejoinfile}; # Not remembering channels
+  $channel = lc $channel;
+  return if exists $self->{joined_channels}->{$channel}; # Already remembered
+  $self->{joined_channels}{$channel} = 1;
+  if (open my $fh, ">", $self->{rejoinfile}) {
+    print $fh "$_\n" foreach keys %{$self->{joined_channels}};
+  }
+}
+
+
+# forget_channel -- update the list of joined channels on disk, if needed
+sub forget_channel($$)
+{
+  my ($self, $channel) = @_;
+
+  return if !$self->{rejoinfile}; # Not remembering channels
+  $channel = lc $channel;
+  if (delete $self->{joined_channels}->{$channel}) { # Forget the channel
+    if (open my $fh, ">", $self->{rejoinfile}) { # Can write file
+      print $fh "$_\n" foreach keys %{$self->{joined_channels}};
+    }
+  }
 }
 
 
@@ -630,7 +661,8 @@ sub said($$)
   $text =~ s/^please\s*,?\s*//i;
   $text =~ s/\s*\.\s*$//;
 
-  return $self->part_channel($channel), undef # undef -> no reply
+  return $self->part_channel($channel),
+      $self->forget_channel($channel), undef # undef -> no reply
       if $text =~ /^bye$/i;
 
   return $self->reload() // "configuration files have been reloaded."
@@ -757,6 +789,7 @@ sub connected($)
   my ($self) = @_;
 
   $self->log("Connected to " . $self->server());
+  $self->join_channel($_) foreach keys %{$self->{joined_channels}};
 }
 
 
@@ -793,7 +826,6 @@ sub read_passwords_file($)
     elsif (/^(.*\t.*)\t(.*\t.*)$/) {$passwords{$1} = $2;}
     else {return "$path:$.: Syntax error: line does not have four fields.";}
   }
-  close $fh;
   $self->{passwords} = \%passwords;
   return undef;			# No error
 }
@@ -855,11 +887,32 @@ sub read_mailing_lists($)
 	return "$path:$.: Syntax error: line does not have a channel name and URL(s)."
       }
     }
-    close $fh;
   }
   $self->{mailing_lists} = \%assoc;
   $self->log("Restore association: $_ -> " . $self->{mailing_lists}->{$_})
       foreach (keys %{$self->{mailing_lists}});
+  return undef;			# No errors
+}
+
+
+# read_rejoin_list -- read or create the rejoin file, if any
+sub read_rejoin_list($)
+{
+  my $self = shift;
+
+  $self->{joined_channels} = {};
+  if ($self->{rejoinfile}) {	# Option -r was given
+    if (-f $self->{rejoinfile}) { # File exists
+      $self->log("Reading $self->{rejoinfile}");
+      open my $fh, "<", $self->{rejoinfile} or
+	  return "$self->{rejoinfile}: $!\n";
+      while (<$fh>) {chomp; $self->{joined_channels}->{lc $_} = 1;}
+    } else {			# File does not exist yet
+      $self->log("Creating $self->{rejoinfile}");
+      open my $fh, ">", $self->{rejoinfile} or
+	  return "$self->{rejoinfile}: $!\n";
+    }
+  }
   return undef;			# No errors
 }
 
@@ -977,7 +1030,7 @@ sub two_level_agenda_parser($$)
 my (%opts, $ssl, $user, $password, $host, $port, %passwords);
 
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
-getopts('c:C:e:m:n:N:v', \%opts) or die "Try --help\n";
+getopts('c:C:e:m:n:N:r:v', \%opts) or die "Try --help\n";
 die "Usage: $0 [options] [--help] irc[s]://server...\n" if $#ARGV != 0;
 
 # The single argument must be an IRC-URL.
@@ -1008,6 +1061,7 @@ my $bot = AgendaBot->new(
   password => $password,
   nick => $opts{'n'} // 'agendabot',
   name => $opts{'N'} // 'AgendaBot '.VERSION.' '.HOME,
+  rejoinfile => $opts{'r'},
   passwords_file => $opts{'c'},
   security_exceptions_uri => $opts{'e'},
   verbose => defined $opts{'v'},
@@ -1025,7 +1079,7 @@ agendabot - IRC 'bot that gets a meeting agenda from a URL
 =head1 SYNOPSIS
 
 agendabot [-n I<nick>] [-N I<name>] [-c I<passwordfile>] [-e I<URL>]
-[-m I<mailing-list-file>] [-C charset] [-v] I<URL>
+[-m I<mailing-list-file>] [-r rejoin-file] [-C charset] [-v] I<URL>
 
 =head1 DESCRIPTION
 
@@ -1336,6 +1390,15 @@ start with "#" but not with a valid channel name are considered
 comments and are also ignored. But note that the file will be
 overwritten and the comments will be lost as soon as Agendabot
 receives a new mailing list association on IRC.
+
+=item B<-r> I<rejoin-file>
+
+If the option B<-r> is given, Agendabot joins the channels in
+I<rejoin-file> as soon as it connects to the server, without having to
+be invited. It updates the file when it is invited to an additional
+channel or is dismissed from one. This way, when Agendabot is stopped
+and then restarted (with the same B<-r> option), it will automatically
+rejoin the channels it was on when it was stopped.
 
 =item B<C> I<charset>
 
