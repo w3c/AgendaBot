@@ -977,7 +977,7 @@ sub two_level_agenda_parser($$)
 my (%opts, $ssl, $user, $password, $host, $port, %passwords);
 
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
-getopts('c:e:m:n:N:v', \%opts) or die "Try --help\n";
+getopts('c:C:e:m:n:N:v', \%opts) or die "Try --help\n";
 die "Usage: $0 [options] [--help] irc[s]://server...\n" if $#ARGV != 0;
 
 # The single argument must be an IRC-URL.
@@ -1003,6 +1003,7 @@ my $bot = AgendaBot->new(
   server => $host,
   port => $port,
   ssl => $ssl,
+  charset => $opts{'C'} // 'utf8',
   username => $user,
   password => $password,
   nick => $opts{'n'} // 'agendabot',
@@ -1024,7 +1025,7 @@ agendabot - IRC 'bot that gets a meeting agenda from a URL
 =head1 SYNOPSIS
 
 agendabot [-n I<nick>] [-N I<name>] [-c I<passwordfile>] [-e I<URL>]
-[-m I<mailing-list-file>] [-v] I<URL>
+[-m I<mailing-list-file>] [-C charset] [-v] I<URL>
 
 =head1 DESCRIPTION
 
@@ -1335,6 +1336,11 @@ start with "#" but not with a valid channel name are considered
 comments and are also ignored. But note that the file will be
 overwritten and the comments will be lost as soon as Agendabot
 receives a new mailing list association on IRC.
+
+=item B<C> I<charset>
+
+Set the character encoding for messages. This should match what the
+IRC server expects. The default is utf8.
 
 =item B<-v>
 
