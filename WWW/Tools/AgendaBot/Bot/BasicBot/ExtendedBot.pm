@@ -71,30 +71,6 @@ sub run
   # run
   $poe_kernel->run() if !$self->{no_run};
   return;
-
-  #   my $self = shift;
-
-  # # Use the iniherited run() method to initialize most of the event
-  # # handlers, but do not start the event loop yet.
-  # my $no_run = $self->{no_run};
-  # $self->no_run(1);
-  # $self->SUPER::run(@_);
-  # $self->no_run($no_run);
-
-  # # Add the extra event handlers defined in this subclass. This says
-  # # $self will handle the event 'irc_invite' with the
-  # # 'irc_invite_state' method.
-  # $poe_kernel->state('irc_invite', $self, 'irc_invite_state');
-  # $poe_kernel->state('irc_whois', $self, 'irc_whois_state');
-
-  # # If the run() exits, this value indicates if it was a normal exit
-  # # or because of a die command. The die_state() event handler is
-  # # called after a die command and sets this value to the error
-  # # message passed to die.
-  # $self->{'@'} = undef;
-
-  # # Now start the event loop, unless no_run was set.
-  # $poe_kernel->run() if !$self->{no_run};
 }
 
 
