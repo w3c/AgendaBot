@@ -460,12 +460,10 @@ sub find_agenda_process($$$$$)
 
   if (scalar(@agenda) > 1) {
     print STDERR "Found agenda with ".scalar(@agenda)." topics for $channel\n";
-    print STDERR "$channel\t(\t$url\n";
+    # print STDERR "$channel\t(\t$url\n";
     print "$channel\t(\t$url\n";
-    print STDERR "$channel\t-\t$_\n" foreach @agenda;
+    # print STDERR "$channel\t-\t$_\n" foreach @agenda;
     print "$channel\t-\t$_\n" foreach @agenda;
-  # } elsif ($tries >= $maxtries) {
-  #   print "$channel\t....
   } else {
     print STDERR "Found no agenda for $channel in $period\n";
     print "$channel\t)\n";
@@ -960,9 +958,8 @@ sub read_passwords_file($)
 
   return undef if !defined $path; # No file to read, not an error
 
-  # Each line must be HOST:PORT\tREALM\tLOGIN\tPASSWORD\tCOOKIE. (The
-  # final \tCOOKIE is optional.) Empty lines and lines that start with
-  # "#" are ignored.
+  # Each line must be HOST:PORT\tREALM\tLOGIN\tPASSWORD. Empty lines
+  # and lines that start with "#" are ignored.
   #
   # TODO: Can there be tabs in any of these fields?
   #
