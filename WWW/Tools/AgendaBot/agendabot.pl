@@ -55,6 +55,16 @@
 # TODO: Automatically start looking for an agenda when Zakim joins the
 # channel?
 #
+# TODO: The EPUB3 WG (Dave Cramer and Wendy Reid) write agendas like this:
+#   Topic (time)
+#   1-Clarify language tag values [1] (15 min)
+#   2-Missing conformance criteria around item properties? [2] (15 min)
+#   3-The default value of rendition:flow [3] (15 min)
+#   4-FXL Accessibility (10 min)
+#
+# TODO: When leaving a channel ("agendabot, bye"), stop any forked
+# processes, not only stop printing the processes' output.
+#
 # Created: 2018-07-09
 # Author: Bert Bos <bert@w3.org>
 #
@@ -73,6 +83,8 @@ use parent 'My::BasicBot';
 use strict;
 use warnings;
 use LWP;
+use HTTP::Cookies;
+use LWP::ConnCache;
 use Getopt::Std;
 use POSIX qw(strftime);
 use Scalar::Util 'blessed';
@@ -81,12 +93,14 @@ use utf8;
 use DateTime;
 use URI;
 use HTML::Entities;
+use HTML::FormatText;
 use POE;			# For OBJECT, ARG0 and ARG1
 
 use constant HOME => 'https://www.w3.org/Tools/AgendaBot';
 use constant MANUAL => 'https://www.w3.org/Tools/AgendaBot/manual.html';
 use constant VERSION => '0.3';
 use constant LIMIT => 20;	# Max # of downloads per day of archives
+use constant MAX_REDIRECTS => 10; # Max # of HTTP redirect
 
 
 # Subroutines to try and recognize an agenda. The order is important:
@@ -110,6 +124,7 @@ sub init($)
   $errmsg = $self->reload() and die "$errmsg\n";
   $errmsg = $self->read_rejoin_list() and die "$errmsg\n";
   $self->{topics} = {};
+  $self->{cookies} = {};
   return 1;
 }
 
@@ -144,23 +159,90 @@ sub is_exception($$$)
 }
 
 
-# request -- send a request to a server and read the response
-sub request($$$$)
+# get_cookies -- make a request with a username and password to get a cookie jar
+sub get_cookies($$$$)
 {
-  my ($self, $method, $info, $uri) = @_;
-  my $channel = $info->{channel};
-  my ($ua, $res, $realm, $user, $password, $user_pass, $challenge, %passwords);
+  my ($self, $uri, $user, $password) = @_;
+  my ($ua, $res, $set_cookie, $nredirects, $cookie);
+
+  $self->log("get_cookies");
 
   $ua = LWP::UserAgent->new;
   $ua->agent(blessed($self) . '/' . VERSION);
   $ua->default_header('Accept' => 'text/*');
   $ua->timeout(10);
   $ua->env_proxy;
+  $ua->conn_cache(LWP::ConnCache->new);
+  $ua->requests_redirectable(['GET', 'HEAD', 'POST']);
+
+  # $uri is a URL that returned a WWW-Authenticate header with scheme
+  # "w3state". Follow redirects on that $uri to arrive at a resource,
+  # which we assume to be a form. If $uri is a resource on
+  # lists.w3.org, there will be two redirects, first to
+  # "https://auth.w3.org/?url=..." and then to
+  # "https://auth.w3.org/login".
+  #
+  $res = $ua->head($uri);
+  return undef if !$res->is_success && $res->code != 401;
+
+  $self->log($_->request->method . " on " . $_->base) foreach ($res->redirects);
+  $self->log($res->request->method . " on " . $res->base);
+
+  # We assume the returned resource is a form with three fields:
+  # "_username", "_password" and "_remember_me". If we started with a
+  # URL on lists.w3.org, this resource will be
+  # "https://auth.w3.org/login". POST to it and then follow
+  # redirects. In this case there should be two more redirects, one to
+  # "https://auth.w3.org/" and one to
+  # "https://auth.w3.org/loggedin").
+  #
+  $self->log("Using " . $res->base);
+  $ua->cookie_jar(HTTP::Cookies->new);
+  $res = $ua->post($res->base, {'_username' => $user, '_password' => $password,
+				    '_remember_me' => 'on'});
+  return undef if !$res->is_success;
+
+  $self->log($_->request->method . " on " . $_->base) foreach ($res->redirects);
+  $self->log($res->request->method . " on " . $res->base);
+
+  # Each of the responses set or removed some cookies. Return a hash
+  # of the remaining cookies. In the case of auth.w3.org, the response
+  # to the POST sets a cookie "PHPSESSID=...", the response to
+  # "https://auth.w3.org" sets a cookie "w3csess=..." and the response
+  # to "https://auth.w3.org/loggedin" deletes the "PHPSESSID" cookie,
+  # so we are left with a "w3csess=..." cookie.
+  #
+  return $ua->cookie_jar;
+}
+
+
+# request -- send a request to a server and read the response
+sub request($$$$;$);
+sub request($$$$;$)
+{
+  my ($self, $method, $info, $uri, $nredirects) = @_;
+  my $channel = $info->{channel};
+  #my ($ua, $res, $realm, $user, $password, $user_pass, $challenge, %passwords);
+  my ($ua, $res, $realm, $user, $password, $user_pass, $challenge);
+  my ($cookies ,$auth_scheme, $host_realm, $location);
+
+  $nredirects //= 0;
+
+  return (508, undef, undef) if $nredirects > MAX_REDIRECTS;
+
+  $ua = LWP::UserAgent->new;
+  $ua->agent(blessed($self) . '/' . VERSION);
+  $ua->default_header('Accept' => 'text/*');
+  $ua->timeout(10);
+  $ua->env_proxy;
+  $ua->requests_redirectable([]); # We need to check WWW-Authenticate first
 
   $res = $method eq "GET" ? $ua->get($uri) :
       $method eq "HEAD" ? $ua->head($uri) : return (400, undef, undef);
 
-  if ($res->code == 401) {	# The resource requires authentication
+  if ($res->code == 401 || $res->header('WWW-Authenticate')) {
+    # The resource requires authentication, or will be different after
+    # authentication.
 
     if ($channel !~ /^&/ &&	# Not a server-local channel
 	! $self->is_exception($channel, $uri)) {
@@ -171,16 +253,20 @@ sub request($$$$)
     # Check the authentication method, extract the realm.
     #
     $challenge = $res->header('WWW-Authenticate');
-    if ($challenge !~ /(?:Basic|Digest) realm="(.*)"/i) {
+    if ($challenge !~ /\b(Basic|Digest|w3state)\b
+        .*(?:\brealm\s*=\s*"([^"]*)")?/xi) {
       $self->log("$uri has an unknown authentication scheme: $challenge");
       return (401, undef, undef);
     }
-    $realm = $1;
+
+    $realm = $2 // '';
+    $auth_scheme = $1;
+    $host_realm = $res->base->host_port . "\t" . $realm;
 
     # See if we know a password for this host and realm.
+    # Instead of a login/password, there may also be a cookie.
     #
-    %passwords = %{$self->{passwords} // {}};
-    $user_pass = $passwords{$res->base->host_port . "\t" . $realm};
+    $user_pass = $self->{passwords}->{$res->base->host_port . "\t" . $realm};
     if (!defined $user_pass) {
       $self->log("No password known for $uri");
       return (401, undef, undef);
@@ -188,16 +274,34 @@ sub request($$$$)
     ($user, $password) = split /\t/, $user_pass;
 
     # Hand the login and password to $ua and try to get the URI again.
+    # If the authentication type if not Basic or Digest, try a cookie instead.
     #
-    $ua->credentials($res->base->host_port, $realm, $user, $password);
+    if ($auth_scheme =~ /Basic|Digest/i) {
+      $ua->credentials($res->base->host_port, $realm, $user, $password);
+    } elsif (($cookies = $self->{cookies}->{$host_realm})) {
+      # Auth scheme is w3cstate, and a cookie was cached.
+      # $self->log("Re-using cookie");
+      $ua->cookie_jar($cookies);
+    } else {
+      # Auth scheme is w3cstate, but no known cookie yet.
+      # $cookies = $self->get_cookies($uri, $user, $password);
+      $cookies = $self->get_cookies($res->header('Location'), $user, $password);
+      return (400, undef, undef) if !defined $cookies;
+      $ua->cookie_jar($cookies);
+      $self->{cookies}->{$host_realm} = $cookies;
+    }
     $res = $method eq "GET" ? $ua->get($uri) :
 	$method eq "HEAD" ? $ua->head($uri) : return (400, undef, undef);
   }
 
   $self->log("Code ".$res->code." on $uri");
 
+  if (($location = $res->header('Location'))) {
+    return $self->request($method, $info, $location, $nredirects + 1);
+  }
+
   return $res->is_success
-      ? ($res->code, $res->content_type, $res->decoded_content())
+      ? ($res->code, join(';', $res->content_type), $res->decoded_content)
       : ($res->code, undef, undef);
 }
 
@@ -225,7 +329,7 @@ sub parse_and_print_agenda($$$)
   my $channel = $info->{channel};
   my $who = $info->{who};
   my @agenda = ();
-  my ($code, $mediatype, $document);
+  my ($code, $mediatype, $document, $plaintext);
 
   # Try to download the resource.
   #
@@ -235,11 +339,22 @@ sub parse_and_print_agenda($$$)
   return "$who, sorry, $uri doesn't seem to exist." if $code == 404;
   return "$who, sorry, could not get $uri (code $code)." if !defined $document;
 
+  if ($uri =~ /^https:\/\/lists\.w3\.org\/Archives\//i) {
+    # If it is a page in the mail archive, extract the original mail body.
+    # $self->log("Extracting the mail body");
+    $document =~ s/.*(<pre id="body">.*<\/pre>).*/$1/s;
+    $plaintext = html_to_text($document);
+  } else {
+    # If it is an HTML or XML document, render it to plain text. Some of
+    # the parsers only handle plain text.
+    $plaintext = html_to_text($document) if $mediatype =~ /html|xml/;
+  }
+
   # Try the parsers in order. Stop as soon as a parser returns an
   # agenda of two or more items. Otherwise use the first one that
   # returned one item.
   for my $parser (@parsers) {
-    my @h = &$parser($mediatype, $document);
+    my @h = &$parser($mediatype, $document, $plaintext // $document);
     @agenda = @h if scalar(@h) > 0;
     last if scalar(@h) > 1;
   }
@@ -293,13 +408,24 @@ sub find_links()
 }
 
 
+# promising_subject -- heuristic if a mail is an agenda, based on its subject
+sub promising_subject($)
+{
+  my $subject = shift;
+  return
+      $subject !~ /^Re:/i &&
+      $subject =~ /\bagenda\b/i &&
+      $subject !~ /\bagenda\+/i;
+}
+
+
 # find_agenda_process -- find an agenda in recent email (background process)
 sub find_agenda_process($$$$$)
 {
   my ($body, $self, $info, $lists, $period) = @_;
   my @urls = split(/ /, $lists);
   my $channel = $info->{channel};
-  my (@agenda, $url, $oldest, %seen);
+  my (@agenda, $url, $oldest, %seen, $plaintext);
   my ($tries, $maxtries) = (0, LIMIT); # Max downloads if $period is "1 day"
 
   if ($period =~ /(\d+) day/) {$maxtries *= $1; $oldest = time - 60*60*24*$1;}
@@ -315,9 +441,19 @@ sub find_agenda_process($$$$$)
     next if $date < $oldest;
     # Add all links from $document that are under $url and not already seen.
     unshift @urls, grep {!$seen{$_}++} $self->find_links($document, $url);
-    next if $subject !~ /\bagenda\b/i;
+
+    # See if the subject indicates an agenda.
+    # print STDERR "Subject: $subject\n";
+    next if !promising_subject($subject);
+
+    # Extract the original mail body from the HTML page.
+    # print STDERR "Extracting the mail body\n";
+    $document =~ s/.*(<pre id="body">.*<\/pre>).*/$1/s;
+    $plaintext = html_to_text($document);
+
+    # Try each of the parsers until one returns two or more agenda items.
     for my $parser (@parsers) {
-      my @h = &$parser($mediatype, $document);
+      my @h = &$parser($mediatype, $document, $plaintext);
       if (scalar(@h) > 1) {@agenda = @h; last;}
     }
   }
@@ -339,16 +475,21 @@ sub find_agenda_process($$$$$)
 sub handle_find_agenda_results
 {
   my ($self, $body, $wheel_id) = @_[OBJECT, ARG0, ARG1];
+  my $channels = $self->{IRCOBJ}->channels();
 
-  # Lines are of the form "CHANNEL<tab>C..." when C = "(", "-" or ")".
-  chomp $body;
-  if ($body =~ /^([^\t]+)\t\(\t(.*)/) {
-    $self->say({channel => $1, body => "agenda: $2"});
-    $self->say({channel => $1, body => "clear agenda"});
-  } elsif ($body =~ /^([^\t]+)\t-\t(.*)/) {
-    $self->say({channel => $1, body => "agenda+ $2"});
-  } elsif ($body =~ /^([^\t]+)\t\)/) {
-    $self->say({channel=>$1, body=>"Sorry, I did not find an agenda."});
+  # Lines are of the form "CHANNEL<tab>C..." where C = "(", "-" or ")".
+  # TODO: Truncate long lines, because say() will split them over two
+  # or more lines, and Zakim doesn't understand continued lines.
+  my ($channel, $type, $text) = $body =~ /^([^\t]+)\t(.)(?:\t(.*))?/;
+  return if !exists $channels->{$channel}; # We're no longer on this channel
+
+  if ($type eq '(') {
+    $self->say({channel => $channel, body => "agenda: $text"}); # $text is a URL
+    $self->say({channel => $channel, body => "clear agenda"});
+  } elsif ($type eq '-') {
+    $self->say({channel => $channel, body => "agenda+ $text"});
+  } elsif ($type eq ')') {
+    $self->say({channel=>$channel, body=>"Sorry, I did not find an agenda."});
   }
 }
 
@@ -413,16 +554,20 @@ sub find_topics_process($$$$$)
 sub handle_find_topics_results
 {
   my ($self, $body, $wheel_id) = @_[OBJECT, ARG0, ARG1];
-  my ($n, $channel);
+  my ($n, $channel, $type, $text);
+  my $channels = $self->{IRCOBJ}->channels();
 
   # Lines are of the form "CHANNEL<tab>C..." where C is "(", "-" or ")"
-  chomp $body;
-  if ($body =~ /^([^\t]+)\t\(/) { # Signals the start of the array
-    $self->{topics}->{$1} = [];	  # Initalize the list of topics
-  } elsif ($body =~ /^([^\t]+)\t-\t(.*)/) {
-    push @{$self->{topics}->{$1}}, $2;
-  } elsif ($body =~ /^([^\t]+)\t\)/) { # Signals the end of the array
-    $channel = $1;
+  # TODO: Truncate long lines, because say() will split them over two
+  # or more lines, and Zakim doesn't understand continued lines.
+  ($channel, $type, $text) = $body =~ /^([^\t]+)\t(.)(?:\t(.*))?/;
+  return if !exists $channels->{$channel}; # We're no longer on this channel
+
+  if ($type eq '(') {		      # Signals the start of the array
+    $self->{topics}->{$channel} = []; # Initalize the list of topics
+  } elsif ($type eq '-') {	      # Signals an additional topic
+    push @{$self->{topics}->{$channel}}, $text;
+  } elsif ($text eq ')') {	      # Signals the end of the array
     $self->{topics_time}->{$channel} = time; # Add a time stamp
     $n = scalar(@{$self->{topics}->{$channel}});
     if ($n == 0) {
@@ -805,7 +950,7 @@ sub log
 }
 
 
-# read_passwords_file -- read passwords from file, return error msg or undef
+# read_passwords_file -- read passwords file, return undef or error msg
 sub read_passwords_file($)
 {
   my $self = shift;
@@ -824,7 +969,7 @@ sub read_passwords_file($)
     if (/^#/) {}		# Comment line
     elsif (/^\s*$/) {}		# Empty line
     elsif (/^(.*\t.*)\t(.*\t.*)$/) {$passwords{$1} = $2;}
-    else {return "$path:$.: Syntax error: line does not have four fields.";}
+    else {return "$path:$.: Syntax error: line has less than four fields.";}
   }
   $self->{passwords} = \%passwords;
   return undef;			# No error
@@ -917,10 +1062,11 @@ sub read_rejoin_list($)
 }
 
 
-# html_to_text -- remove tags and expand charactet entities
+# html_to_text -- remove tags and expand character entities
 sub html_to_text($)
 {
-  return decode_entities($_[0] =~ s/<[^>]*>//gr);
+  return HTML::FormatText->format_string($_[0],
+      leftmargin => 0, rightmargin => 99999);
 }
 
 
@@ -937,9 +1083,9 @@ sub html_to_text($)
 
 
 # bb_agenda_parser -- find an agenda written in Bert's agenda style
-sub bb_agenda_parser($$)
+sub bb_agenda_parser($$$)
 {
-  my ($mediatype, $document) = @_;
+  my ($mediatype, $document, $plaintext) = @_;
   my @agenda = ();
 
   # Agenda topics have a number and are underlined, e.g.:
@@ -947,16 +1093,15 @@ sub bb_agenda_parser($$)
   # 1. Welcome
   # ----------
   #
-  $document = html_to_text($document) if $mediatype =~ /html|xml/;
-  push @agenda, $1 while $document =~ /^[ \t]*[0-9]+.[ \t]*(.+)\r?\n----/mg;
+  push @agenda, $1 while $plaintext =~ /^[ \t]*[0-9]+.[ \t]*(.+)\r?\n----/mg;
   return @agenda;
 }
 
 
 # addison_agenda_parser -- find an agenda in Addison Phillips' style
-sub addison_agenda_parser($$)
+sub addison_agenda_parser($$$)
 {
-  my ($mediatype, $document) = @_;
+  my ($mediatype, $document, $plaintext) = @_;
   my @agenda = ();
 
   # The agenda looks like:
@@ -965,17 +1110,16 @@ sub addison_agenda_parser($$)
   # Topic: AOB?
   # Topic: Radar
   #
-  $document = html_to_text($document) if $mediatype =~ /html|xml/;
-  return () if $document !~ /==\h*AGENDA\h*==/i;
-  push @agenda, $1 while $document =~ /^\h*Topic\h*:\h*(.+)/mgi;
+  return () if $plaintext !~ /^\h*=+\h*AGENDA\h*=/mi;
+  push @agenda, $1 while $plaintext =~ /^\h*Topic\h*:\h*(.+)/mgi;
   return @agenda;
 }
 
 
 # koalie_and_plh_agenda_parser -- find an agenda in Coralie's/Philippe's style
-sub koalie_and_plh_agenda_parser($$)
+sub koalie_and_plh_agenda_parser($$$)
 {
-  my ($mediatype, $document) = @_;
+  my ($mediatype, $document, $plaintext) = @_;
   my @agenda;
 
   # The agenda already uses Zakim's format, i.e., topics are prefixed
@@ -984,16 +1128,15 @@ sub koalie_and_plh_agenda_parser($$)
   # agenda+ Roundtable
   # agenda+ TPAC registration
   #
-  $document = html_to_text($document) if $mediatype =~ /html|xml/;
-  push @agenda, $1 while $document =~ /^\h*agenda\+\h+(.*)/mgi;
+  push @agenda, $1 while $plaintext =~ /^\h*agenda\+\h+(.*)/mgi;
   return @agenda;
 }
 
 
 # two_level_agenda_parser -- find an agenda in the style of Axel Polleres
-sub two_level_agenda_parser($$)
+sub two_level_agenda_parser($$$)
 {
-  my ($mediatype, $doc) = @_;
+  my ($mediatype, $document, $plaintext) = @_;
   my @agenda;
   my $i = 10000;		# Bigger than any expected indent
   my $delim;
@@ -1010,16 +1153,21 @@ sub two_level_agenda_parser($$)
   #       1) fix call-details for future calls
   #       2) discuss F2F at MyData, how can we reach out broader?
   #
-  return () if $doc !~ /\bAgenda\b/i;
-  $doc = html_to_text($doc) if $mediatype =~ /html|xml/;
+  return () if $plaintext !~ /\bAgenda\b/i;
+
+  # Remove all text before the word "agenda".
+  $plaintext =~ s/^.*?\bagenda\b//is;
 
   # Store the least indented marker in $delim, if any.
   #
   foreach my $d (qr/\d+\)/, qr/\d+\./, qr/\*/, qr/-/, qr/•/, qr/◦/, qr/⁃/) {
-    if ($doc =~ /^(\h*)$d\h/m && length $1 < $i) {$i = length $1; $delim = $d}
+    if ($plaintext =~ /^(\h*)$d\h/m && length $1 < $i) {
+      $i = length $1;
+      $delim = $d
+    }
   }
   return () if !defined $delim;
-  push @agenda, $1 while $doc =~ /^\h*$delim\h+(.*)/mg;
+  push @agenda, $1 while $plaintext =~ /^\h*$delim\h+(.*)/mg;
   return @agenda;
 }
 
@@ -1027,7 +1175,7 @@ sub two_level_agenda_parser($$)
 
 # Main body
 
-my (%opts, $ssl, $user, $password, $host, $port, %passwords);
+my (%opts, $ssl, $user, $password, $host, $port, %passwords, $channel);
 
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
 getopts('c:C:e:m:n:N:r:v', \%opts) or die "Try --help\n";
@@ -1035,13 +1183,15 @@ die "Usage: $0 [options] [--help] irc[s]://server...\n" if $#ARGV != 0;
 
 # The single argument must be an IRC-URL.
 #
-$ARGV[0] =~ m/^(ircs?):\/\/(?:([^:]+):([^@]+)?@)?([^:\/#?]+)(?::([^\/]*))?/i or
+$ARGV[0] =~ m/^(ircs?):\/\/(?:([^:]+):([^@]+)?@)?([^:\/#?]+)(?::([^\/]*))?(?:\/(.*))?$/i or
     die "Argument must be a URI starting with `irc:' or `ircs:'\n";
 $ssl = $1 eq 'ircs';
 $user = $2 =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/egr if defined $2;
 $password = $3 =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/egr if defined $3;
 $host = $4;
 $port = $5 // ($ssl ? 6697 : 6667);
+$channel = $6 =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/egr if defined $6;
+$channel = '#' . $channel if defined $channel && $channel !~ /^[#&]/;
 # TODO: Do something with any passed channel name
 # TODO: Do something with other parameters, such as a key
 if (defined $user && !defined $password) {
@@ -1061,6 +1211,7 @@ my $bot = AgendaBot->new(
   password => $password,
   nick => $opts{'n'} // 'agendabot',
   name => $opts{'N'} // 'AgendaBot '.VERSION.' '.HOME,
+  channels => (defined $channel ? [$channel] : []),
   rejoinfile => $opts{'r'},
   passwords_file => $opts{'c'},
   security_exceptions_uri => $opts{'e'},
