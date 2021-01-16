@@ -79,7 +79,7 @@
 
 package AgendaBot;
 use lib '.';
-use parent 'My::BasicBot';
+use parent 'Bot::BasicBot::ExtendedBot';
 use strict;
 use warnings;
 use LWP;
