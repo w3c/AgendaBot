@@ -222,7 +222,6 @@ sub request($$$$;$)
 {
   my ($self, $method, $info, $uri, $nredirects) = @_;
   my $channel = $info->{channel};
-  #my ($ua, $res, $realm, $user, $password, $user_pass, $challenge, %passwords);
   my ($ua, $res, $realm, $user, $password, $user_pass, $challenge);
   my ($cookies ,$auth_scheme, $host_realm, $location);
 
@@ -292,6 +291,7 @@ sub request($$$$;$)
     }
     $res = $method eq "GET" ? $ua->get($uri) :
 	$method eq "HEAD" ? $ua->head($uri) : return (400, undef, undef);
+
   }
 
   $self->log("Code ".$res->code." on $uri");
@@ -460,7 +460,9 @@ sub find_agenda_process($$$$$)
 
   if (scalar(@agenda) > 1) {
     print STDERR "Found agenda with ".scalar(@agenda)." topics for $channel\n";
+    print STDERR "$channel\t(\t$url\n";
     print "$channel\t(\t$url\n";
+    print STDERR "$channel\t-\t$_\n" foreach @agenda;
     print "$channel\t-\t$_\n" foreach @agenda;
   # } elsif ($tries >= $maxtries) {
   #   print "$channel\t....
@@ -933,7 +935,6 @@ sub connected($)
 {
   my ($self) = @_;
 
-  $self->log("Connected to " . $self->server());
   $self->join_channel($_) foreach keys %{$self->{joined_channels}};
 }
 
@@ -959,8 +960,9 @@ sub read_passwords_file($)
 
   return undef if !defined $path; # No file to read, not an error
 
-  # Each line must be HOST:PORT\tREALM\tLOGIN\tPASSWORD. Empty lines
-  # and lines that start with "#" are ignored.
+  # Each line must be HOST:PORT\tREALM\tLOGIN\tPASSWORD\tCOOKIE. (The
+  # final \tCOOKIE is optional.) Empty lines and lines that start with
+  # "#" are ignored.
   #
   # TODO: Can there be tabs in any of these fields?
   #
@@ -1068,6 +1070,72 @@ sub html_to_text($)
   return HTML::FormatText->format_string($_[0],
       leftmargin => 0, rightmargin => 99999);
 }
+
+
+# html_to_text -- format HTML to plain text
+sub html_to_text($$$)
+{
+  my ($self, $document, $linelength) = @_;
+
+  # Remove comments
+  $document =~ s/<!--.*?-->//g;
+
+  # Remove STYLE and SCRIPT elements.
+  $document =~ s/<style\b.*?<\/style\s*>//isg;
+  $document =~ s/<script\b.*?<\/scripts*>//isg;
+
+  # Remove Form Feeds and Escapes, because we will use them as markers
+  $document =~ s/\014/ /g;
+  $document =~ s/\033//g;
+
+  # Normalize CR and LF to LF.
+  $document =~ s/\r\n?/\n/g;
+
+  # Replace LI by "<P>* "
+  $document =~ s/<li\b[^>]*>/<p>* /ig;
+
+  # Replace start and end tags of block elements by Form Feeds.
+  $document =~ s/<\/?(?:p|div|h[1-6]|blockquote|address|article|section|
+    main|header|footer|ul|ol|dl|li|dt|dd|hr|title)\b[^>]*>/\014/igx;
+  $document .= "\014";
+
+  # Replace BRs by Escapes.
+  $document =~ s/<br\b[^>]*>/\033/ig;
+
+  # Replace line feeds inside PRE temporarily by escapes and spaces by NBSP.
+  $document =~ s/<pre\b[^>]*>\n?(.*?)\n?<\/pre\s*>/
+    "\014".($1 =~ y{\n }{\033\240}r)."\014"/isexg;
+
+  # Remove all remaining tags
+  $document =~ s/<[^>]*>//g;
+
+  # Collapse spaces.
+  $document =~ s/[ \n\t\r]+/ /g;
+  $document =~ s/ \014/\014/g;
+  $document =~ s/\014 /\014/g;
+  $document =~ s/^ //s;
+  $document =~ s/ $//s;
+
+  # Replace sequences of one or more Form Feeds by exactly two Form Feeds.
+  $document =~ s/\014+/\014\014/g;
+  $document =~ s/^\014\014//s;
+  $document =~ s/\014\014$/\014/s;
+
+  # Replace Form Feeds and escapes by line feeds.
+  $document =~ s/[\014\033]/\n/g;
+
+  # Replace character entities.
+  $document =~ s/&([^;]+);/entity($1)/eg;
+
+  # Replace NBSP by space.
+  $document =~ s/\240/ /g;
+
+  # Wrap long lines. TODO: Wrap preferably at spaces, hyphens and slashes.
+  $document =~ s/(.{$linelength})/$1\n/g;
+
+  return $document;
+}
+
 
 
 # The following subroutines are parsers that try to find a meeting
@@ -1497,16 +1565,17 @@ The real name of the bot. Default is "AgendaBot".
 
 =item B<-c> I<passwordfile>
 
-I<passwordfile> is a file with login names and passwords for various
-servers. When agendabot is trying to retrieve a document over HTTP and
-receives an authentication request, it looks in this file. The file
-must contain lines with four tab-separated fields: host:port, realm,
-login, password. The port is required. Empty lines and lines that
-start with "#" are ignored. Other lines cause an error. E.g.:
+I<passwordfile> is a file with login names, passwords and cookies for
+various servers. When agendabot is trying to retrieve a document over
+HTTP and receives an authentication request, it looks in this
+file. The file must contain lines with four or five tab-separated
+fields: host:port, realm, login, password and optional cookie. The
+port is required. Empty lines and lines that start with "#" are
+ignored. Other lines cause an error. E.g.:
 
  # This is a password file
  example.org:443	Member login/passw	joe	secret
- info.example.org:443	Member login/passw	joe	secret
+ info.example.org:443	Member login/passw	joe	secret	sess=123abc
 
 =item B<-e> I<URL>
 
