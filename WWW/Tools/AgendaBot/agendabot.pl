@@ -95,6 +95,9 @@ use URI;
 use HTML::Entities;
 use HTML::FormatText;
 use POE;			# For OBJECT, ARG0 and ARG1
+use Encode qw(encode decode);
+use Digest::SHA qw(sha256);
+use MIME::Base64;
 
 use constant HOME => 'https://www.w3.org/Tools/AgendaBot';
 use constant MANUAL => 'https://www.w3.org/Tools/AgendaBot/manual.html';
@@ -121,7 +124,7 @@ sub init($)
   my $self = shift;
   my $errmsg;
 
-  $errmsg = $self->reload() and die "$errmsg\n";
+  $errmsg = $self->load() and die "$errmsg\n";
   $errmsg = $self->read_rejoin_list() and die "$errmsg\n";
   $self->{topics} = {};
   $self->{cookies} = {};
@@ -129,8 +132,8 @@ sub init($)
 }
 
 
-# reload - reload configuration files, return error message or undef
-sub reload($)
+# load - load configuration files, return error message or undef
+sub load($)
 {
   my $self = shift;
   my $errmsg;
@@ -810,9 +813,6 @@ sub said($$)
       $self->forget_channel($channel), undef # undef -> no reply
       if $text =~ /^bye$/i;
 
-  return $self->reload() // "configuration files have been reloaded."
-      if $text =~ /^reload$/i;
-
   return $self->find_agenda($info, $1 // "7 days")
       if $text =~ /^(?:find|search(?:\s+for)?|look\s+for)\s+
       	           (?:an\s+|the\s+)?agenda
@@ -912,10 +912,6 @@ sub help($$)
       . "for agendas."
       if $text =~ /^status|info/i;
 
-  return "if you say \$me, reload\", I will re-read my configuration "
-      . "files. This is only useful if they changed, of course."
-      if $text =~ /^reload/i;
-
   return "if you say \"$me, bye\", I will leave this channel. "
       . "I will continue to remember any associated mailing lists and "
       . "suggested agenda topics, in case you /invite me back."
@@ -924,7 +920,7 @@ sub help($$)
   return "I am an instance of " . blessed($self) . " " . VERSION . ". "
       . "For detailed help, type \"help COMMAND\", where COMMAND is "
       . "one of invite, agenda, find, suggest, accept, "
-      . "this is, forget, status, reload or bye. Or go to " . MANUAL;
+      . "this is, forget, status or bye. Or go to " . MANUAL;
 }
 
 
@@ -949,12 +945,32 @@ sub log
 }
 
 
+# decypt -- decrypt "user\tencrypted" into "user\tpassword"
+sub decrypt($$$)
+{
+  my ($self, $user_and_encrypted, $passphrase) = @_;
+  my ($user, $encrypted, $mask, $password, $len, $repeat);
+
+  ($user, $encrypted) = $user_and_encrypted =~ /^(.*)\t(.*)$/;
+  $mask = sha256(encode('UTF-8', $passphrase));
+  $encrypted = decode_base64($encrypted);
+  $len = length($mask);
+  $repeat = int((length($encrypted) + $len - 1) / $len);
+  $mask = $mask x $repeat;
+  $password = $encrypted ^ $mask;
+  $password = decode('UTF-8', $password);
+  $password =~ s/\0+$//;
+  return "$user\t$password";
+}
+
+
 # read_passwords_file -- read passwords file, return undef or error msg
 sub read_passwords_file($)
 {
   my $self = shift;
-  my (%passwords, $fh);
+  my (%passwords, $fh, $passphrase);
   my $path = $self->{passwords_file};
+  my $encrypted = 0;
 
   return undef if !defined $path; # No file to read, not an error
 
@@ -963,13 +979,30 @@ sub read_passwords_file($)
   #
   # TODO: Can there be tabs in any of these fields?
   #
-  open $fh, "<", $path or return "$path: cannot be opened.";
+  open $fh, "< :encoding(UTF-8)", $path or return "$path: cannot be opened.";
   while (<$fh>) {
     if (/^#/) {}		# Comment line
     elsif (/^\s*$/) {}		# Empty line
+    elsif (/^\s*!encrypted\b/) {$encrypted = 1}
     elsif (/^(.*\t.*)\t(.*\t.*)$/) {$passwords{$1} = $2;}
     else {return "$path:$.: Syntax error: line has less than four fields.";}
   }
+
+  # If the passwords column is encrypted, decrypt it.
+  if ($encrypted) {
+    print "Passphrase to decrypt the passwords file: ";
+    ReadMode('noecho');
+    $passphrase = ReadLine(0);
+    ReadMode('restore');
+    print "\n";
+    chomp $passphrase;
+    foreach my $k (keys %passwords) {
+      $passwords{$k} = $self->decrypt($passwords{$k}, $passphrase);
+    }
+    # TODO: Does this work to overwrite the memory location?
+    $passphrase = "x" x length($passphrase);
+  }
+
   $self->{passwords} = \%passwords;
   return undef;			# No error
 }
@@ -1194,7 +1227,7 @@ $channel = '#' . $channel if defined $channel && $channel !~ /^[#&]/;
 # TODO: Do something with any passed channel name
 # TODO: Do something with other parameters, such as a key
 if (defined $user && !defined $password) {
-  print "Password for user \"$user\": ";
+  print "IRC password for user \"$user\": ";
   ReadMode('noecho');
   $password = ReadLine(0);
   ReadMode('restore');
@@ -1341,11 +1374,6 @@ Tells AgendaBot to leave the current channel.
 Ask AgendaBot to give a brief description of itself. To get
 information about a specific command, such as "find", type "agendabot,
 help find".
-
-=item "agendabot, reload"
-
-If Agendabot was started with configuration files (options B<-c> and
-B<-e>), this asks Agendabot to read those files again.
 
 =item "agendabot, find agenda"
 
@@ -1499,14 +1527,28 @@ The real name of the bot. Default is "AgendaBot".
 I<passwordfile> is a file with login names, passwords and cookies for
 various servers. When agendabot is trying to retrieve a document over
 HTTP and receives an authentication request, it looks in this
-file. The file must contain lines with four or five tab-separated
-fields: host:port, realm, login, password and optional cookie. The
+file. The file must contain lines with four tab-separated
+fields: host:port, realm, login and password. The
 port is required. Empty lines and lines that start with "#" are
 ignored. Other lines cause an error. E.g.:
 
  # This is a password file
  example.org:443	Member login/passw	joe	secret
- info.example.org:443	Member login/passw	joe	secret	sess=123abc
+ info.example.org:443	Member login/passw	joe	secret
+
+The passwords column can be encrypted with a passphrase. To indicate
+that it is indeed encrypted, include a line "!encrypted", e.g., like
+this:
+
+ # This is a password file with encrypted passwords
+ !encrypted
+ example.org:443	Member login/passw	joe	34AF323AA218928
+ info.example.org:443	Member login/passw	joe	125656340CD0990
+
+When Agendabot starts, it will prompt for the passphrase to decrypt
+the passwords.
+
+The password file must be in UTF-8.
 
 =item B<-e> I<URL>
 
