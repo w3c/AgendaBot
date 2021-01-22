@@ -42,7 +42,7 @@
 # TODO: The associations of channels with mailing list archives should
 # allow for channels on different IRC networks.
 #
-# TODO: Do more oparations that involve HTTP requests in the
+# TODO: Do more operations that involve HTTP requests in the
 # background.
 #
 # TODO: More intelligent and configurable $maxtries.
@@ -68,7 +68,7 @@
 # Created: 2018-07-09
 # Author: Bert Bos <bert@w3.org>
 #
-# Copyright © 2018-2020 World Wide Web Consortium, (Massachusetts Institute
+# Copyright © 2018-2021 World Wide Web Consortium, (Massachusetts Institute
 # of Technology, European Research Consortium for Informatics and
 # Mathematics, Keio University, Beihang). All Rights Reserved. This
 # work is distributed under the W3C® Software License
@@ -308,6 +308,7 @@ sub request($$$$;$)
 
   $self->log("Code ".$res->code." on $uri");
 
+  # If we got a redirect, recurse.
   if (($location = $res->header('Location'))) {
     return $self->request($method, $info, $location, $nredirects + 1);
   }
@@ -341,15 +342,16 @@ sub parse_and_print_agenda($$$)
   my $channel = $info->{channel};
   my $who = $info->{who};
   my @agenda = ();
-  my ($code, $mediatype, $document, $plaintext);
+  my ($code, $type, $document, $plaintext);
 
   # Try to download the resource.
   #
-  ($code, $mediatype, $document) = $self->get($info, $uri);
+  ($code, $type, $document) = $self->get($info, $uri);
   return "$who, sorry, I don't have a password for $uri" if $code == 401;
   return "$who, sorry, the document at $uri is protected." if $code == 403;
   return "$who, sorry, $uri doesn't seem to exist." if $code == 404;
   return "$who, sorry, could not get $uri (code $code)." if !defined $document;
+  return "$who, sorry, $uri doesn't seem to be text." if $type!~/^text\/|\+xml\b/;
 
   if ($uri =~ /^https:\/\/lists\.w3\.org\/Archives\//i) {
     # If it is a page in the mail archive, extract the original mail body.
@@ -359,14 +361,14 @@ sub parse_and_print_agenda($$$)
   } else {
     # If it is an HTML or XML document, render it to plain text. Some of
     # the parsers only handle plain text.
-    $plaintext = html_to_text($document) if $mediatype =~ /html|xml/;
+    $plaintext = html_to_text($document) if $type =~ /html|xml/;
   }
 
   # Try the parsers in order. Stop as soon as a parser returns an
   # agenda of two or more items. Otherwise use the first one that
   # returned one item.
   for my $parser (@parsers) {
-    my @h = &$parser($mediatype, $document, $plaintext // $document);
+    my @h = &$parser($type, $document, $plaintext // $document);
     @agenda = @h if scalar(@h) > 0;
     last if scalar(@h) > 1;
   }
@@ -440,6 +442,9 @@ sub find_agenda_process($$$$$)
   my (@agenda, $url, $oldest, %seen, $plaintext);
   my ($tries, $maxtries) = (0, LIMIT); # Max downloads if $period is "1 day"
 
+  binmode(STDOUT, ":utf8");
+  binmode(STDERR, ":utf8");
+
   if ($period =~ /(\d+) day/) {$maxtries *= $1; $oldest = time - 60*60*24*$1;}
   elsif ($period =~ /(\d+) week/) {$maxtries *= 7*$1; $oldest = 60*60*24*7*$1;}
   else {print STDERR "Bug! find_agenda_process(... \"$period\")\n"; return;}
@@ -492,6 +497,7 @@ sub handle_find_agenda_results
   # Lines are of the form "CHANNEL<tab>C..." where C = "(", "-" or ")".
   # TODO: Truncate long lines, because say() will split them over two
   # or more lines, and Zakim doesn't understand continued lines.
+  $body = decode('UTF-8', $body);
   my ($channel, $type, $text) = $body =~ /^([^\t]+)\t(.)(?:\t(.*))?/;
   return if !exists $channels->{$channel}; # We're no longer on this channel
 
@@ -541,6 +547,9 @@ sub find_topics_process($$$$$)
   my (@agenda, $url, $oldest, %seen);
   my ($tries, $maxtries) = (0, LIMIT); # Max downloads if $period is "1 day"
 
+  binmode(STDOUT, ":utf8");
+  binmode(STDERR, ":utf8");
+
   if ($period =~ /(\d+) day/) {$maxtries *= $1; $oldest = time - 60*60*24*$1;}
   elsif ($period =~ /(\d+) week/) {$maxtries *= 7*$1; $oldest = 60*60*24*7*$1;}
   else {print STDERR "Bug! find_topics_process(... \"$period\")\n"; return;}
@@ -572,6 +581,7 @@ sub handle_find_topics_results
   # Lines are of the form "CHANNEL<tab>C..." where C is "(", "-" or ")"
   # TODO: Truncate long lines, because say() will split them over two
   # or more lines, and Zakim doesn't understand continued lines.
+  $body = decode('UTF-8', $body);
   ($channel, $type, $text) = $body =~ /^([^\t]+)\t(.)(?:\t(.*))?/;
   return if !exists $channels->{$channel}; # We're no longer on this channel
 
