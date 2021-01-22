@@ -235,18 +235,13 @@ sub request($$$$;$)
 
   return (508, undef, undef) if $nredirects > MAX_REDIRECTS;
 
-  if (defined $self->{ua}) {	# Already made a UserAgent?
-    $ua = $self->{ua};
-  } else {
-    $ua = LWP::UserAgent->new;
-    $ua->agent(blessed($self) . '/' . VERSION);
-    $ua->default_header('Accept' => 'text/*');
-    $ua->timeout(10);
-    $ua->conn_cache(LWP::ConnCache->new);
-    $ua->env_proxy;
-    $ua->requests_redirectable([]); # We need to check WWW-Authenticate first
-    $self->{ua} = $ua;
-  }
+  $ua = LWP::UserAgent->new;
+  $ua->agent(blessed($self) . '/' . VERSION);
+  $ua->default_header('Accept' => 'text/*');
+  $ua->timeout(10);
+  # $ua->conn_cache(LWP::ConnCache->new);
+  $ua->env_proxy;
+  $ua->requests_redirectable([]); # We need to check WWW-Authenticate first
 
   $res = $method eq "GET" ? $ua->get($uri) :
       $method eq "HEAD" ? $ua->head($uri) : return (400, undef, undef);
