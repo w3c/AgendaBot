@@ -170,6 +170,9 @@ sub get_cookies($$$$)
 
   $self->log("get_cookies");
 
+  # Don't use the UserAgent stored in $self->{ua}, because the
+  # requests_redirectable() is different.
+  #
   $ua = LWP::UserAgent->new;
   $ua->agent(blessed($self) . '/' . VERSION);
   $ua->default_header('Accept' => 'text/*');
@@ -232,12 +235,18 @@ sub request($$$$;$)
 
   return (508, undef, undef) if $nredirects > MAX_REDIRECTS;
 
-  $ua = LWP::UserAgent->new;
-  $ua->agent(blessed($self) . '/' . VERSION);
-  $ua->default_header('Accept' => 'text/*');
-  $ua->timeout(10);
-  $ua->env_proxy;
-  $ua->requests_redirectable([]); # We need to check WWW-Authenticate first
+  if (defined $self->{ua}) {	# Already made a UserAgent?
+    $ua = $self->{ua};
+  } else {
+    $ua = LWP::UserAgent->new;
+    $ua->agent(blessed($self) . '/' . VERSION);
+    $ua->default_header('Accept' => 'text/*');
+    $ua->timeout(10);
+    $ua->conn_cache(LWP::ConnCache->new);
+    $ua->env_proxy;
+    $ua->requests_redirectable([]); # We need to check WWW-Authenticate first
+    $self->{ua} = $ua;
+  }
 
   $res = $method eq "GET" ? $ua->get($uri) :
       $method eq "HEAD" ? $ua->head($uri) : return (400, undef, undef);
