@@ -1275,7 +1275,7 @@ agendabot [-n I<nick>] [-N I<name>] [-c I<passwordfile>] [-e I<URL>]
 
 =head1 DESCRIPTION
 
-agendabot is an IRC 'bot. It connects to the IRC server given by the
+Agendabot is an IRC 'bot. It connects to the IRC server given by the
 URL (e.g., "irc://irc.example.org/"), waits until it is /invite'd to
 one or more channels and then watches those channels for lines of the
 form
@@ -1357,7 +1357,7 @@ as "%3a", "/" as "%2f", etc.
 
 =head2 IRC commands
 
-For more details about the commands Agendabot understands on IRC, see
+For more details about the commands agendabot understands on IRC, see
 the manual, or use the "agendabot, help" command on IRC. Here is a
 brief list:
 
@@ -1365,59 +1365,59 @@ brief list:
 
 =item "/invite agendabot"
 
-When AgendaBot is invited to a channel, it tries to join that channel.
+When agendabot is invited to a channel, it tries to join that channel.
 
 =item" agenda: I<URL>"
 
 Makes agendabot try and retrieve the URL, parse the result to try and
 find an agenda, and print that agenda on IRC in the right format for
-Zakim 'bot. AgendaBot prints an error message if it fails to find an
+Zakim 'bot. Agendabot prints an error message if it fails to find an
 agenda.
 
 =item "agendabot, bye"
 
-Tells AgendaBot to leave the current channel.
+Tells agendabot to leave the current channel.
 
 =item "agendabot, help" and "agendabot help I<command>"
 
-Ask AgendaBot to give a brief description of itself. To get
+Ask agendabot to give a brief description of itself. To get
 information about a specific command, such as "find", type "agendabot,
 help find".
 
 =item "agendabot, find agenda"
 
-Ask Agendabot to look in the mail archives for an agenda. It looks
+Ask agendabot to look in the mail archives for an agenda. It looks
 back one week. To search other periods, add a number of days or weeks,
 e.g.: "agendabot, find agenda since 10 days".
 
 =item "agendabot, suggest agenda"
 
-Ask Agendabot to look in the mail archives for messages that have
+Ask agendabot to look in the mail archives for messages that have
 "agenda+" in their subject. It looks for message less than one week
 old. To search other periods, add a number of days or weeks, e.g.,
 "agendabot, suggest agenda since 2 weeks".
 
 =item "agendabot, accept"
 
-Ask Agendabot to turn the suggested agenda into an actual agenda.
+Ask agendabot to turn the suggested agenda into an actual agenda.
 
 =item "agendabot, this is I<list>" and "agendabot, this is I<URL>"
 
-Tell Agendabot in what mailing list to search for agendas. The short
+Tell agendabot in what mailing list to search for agendas. The short
 form, e.g., "agendabot, this is style" or "agendabot, this is w3t",
-causes Agendabot to guess the URL. In this case, it will find
+causes agendabot to guess the URL. In this case, it will find
 ".../Public/www-style/" and ".../Team/w3t". (It may not have access to
 password-protected archives, see the B<-c> option.)
 
 =item "agendabot, forget"
 
-Ask Agendabot to forget the mailing list for this channel. Subsequent
+Ask agendabot to forget the mailing list for this channel. Subsequent
 "find" and "suggest" commands will fail, until a new mailing list is
 associated with "this is".
 
 =item "agendabot, status"
 
-Ask Agendabot to display the URL of the mailing list where it searches
+Ask agendabot to display the URL of the mailing list where it searches
 for agendas.
 
 =back
@@ -1554,21 +1554,21 @@ this:
  example.org:443	Member login/passw	joe	34AF323AA218928
  info.example.org:443	Member login/passw	joe	125656340CD0990
 
-When Agendabot starts, it will prompt for the passphrase to decrypt
+When agendabot starts, it will prompt for the passphrase to decrypt
 the passwords.
 
 The password file must be in UTF-8.
 
 =item B<-e> I<URL>
 
-Normally, Agendabot only uses the password file (option B<-c>) when it
+Normally, agendabot only uses the password file (option B<-c>) when it
 is asked to retrieve an agenda on a server-local channel, i.e., a
 channel that starts with "&". It will refuse to retrieve
 password-protected agendas on public channels or in private messages.
 The B<-e> option points to a list of exceptions. Each line in the
 indicated file consists of a channel name and a URL prefix, separated
 by a tab. If a URL is asked for on a channel and the channel name and
-the URL match a line in this file, Agendabot will try to retrieve the
+the URL match a line in this file, agendabot will try to retrieve the
 agenda, even if it is password-protected. Empty lines and lines
 that start with "# " are ignored. E.g.:
 
@@ -1580,9 +1580,9 @@ it is a URL, not a file name. To refer to a local file, use a "file:".
 
 =item B<-m> I<mailing-lists-file>
 
-When IRC channels are associated with mailing lists (so that Agendabot
+When IRC channels are associated with mailing lists (so that agendabot
 knows which archives to search for agendas), those associations are
-stored in a file. This way, when Agendabot is restarted, it still
+stored in a file. This way, when agendabot is restarted, it still
 knows the associations. This option specifies the file. The default is
 agendabot.assoc.
 
@@ -1590,15 +1590,15 @@ The file contains lines consisting of a channel name, a tab and a
 space-separated list of URLs. Empty lines are ignored and lines that
 start with "#" but not with a valid channel name are considered
 comments and are also ignored. But note that the file will be
-overwritten and the comments will be lost as soon as Agendabot
+overwritten and the comments will be lost as soon as agendabot
 receives a new mailing list association on IRC.
 
 =item B<-r> I<rejoin-file>
 
-If the option B<-r> is given, Agendabot joins the channels in
+If the option B<-r> is given, agendabot joins the channels in
 I<rejoin-file> as soon as it connects to the server, without having to
 be invited. It updates the file when it is invited to an additional
-channel or is dismissed from one. This way, when Agendabot is stopped
+channel or is dismissed from one. This way, when agendabot is stopped
 and then restarted (with the same B<-r> option), it will automatically
 rejoin the channels it was on when it was stopped.
 
@@ -1619,6 +1619,10 @@ what it is doing.
 Parsing of XHTML/HTML/HTML5/XML is not complete. In particular
 occurrences of E<lt> or E<gt> in attributes or CDATA sections may
 cause missed or false matches.
+
+The character encoding of an HTML file may be wrong, if it is declared
+with a C<meta> element and is different from that set by the HTTP
+header C<Content-Type>. Agendabot only uses the latter.
 
 The current parsers in agendabot will try to parse any other text/*
 format as if it was plain text, which may give strange results. E.g.,
