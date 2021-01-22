@@ -239,7 +239,7 @@ sub request($$$$;$)
   $ua->agent(blessed($self) . '/' . VERSION);
   $ua->default_header('Accept' => 'text/*');
   $ua->timeout(10);
-  # $ua->conn_cache(LWP::ConnCache->new);
+  $ua->conn_cache(LWP::ConnCache->new);
   $ua->env_proxy;
   $ua->requests_redirectable([]); # We need to check WWW-Authenticate first
 
