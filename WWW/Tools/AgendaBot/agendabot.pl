@@ -284,10 +284,21 @@ sub request($$$$;$)
     #
     if ($auth_scheme =~ /Basic|Digest/i) {
       $ua->credentials($res->base->host_port, $realm, $user, $password);
+      $res = $method eq "GET" ? $ua->get($uri) :
+	  $method eq "HEAD" ? $ua->head($uri) : return (400, undef, undef);
     } elsif (($cookies = $self->{cookies}->{$host_realm})) {
       # Auth scheme is w3cstate, and a cookie was cached.
       # $self->log("Re-using cookie");
       $ua->cookie_jar($cookies);
+      $res = $method eq "GET" ? $ua->get($uri) :
+	  $method eq "HEAD" ? $ua->head($uri) : return (400, undef, undef);
+      if ($res->header('WWW-Authenticate')) {
+	# If we still get a WWW-Authenticate header, the cookies were
+	# wrong. They maybe expired. Remove them and try again,
+	# recursively.
+	delete $self->{cookies}->{$host_realm};
+	return $self->request($method, $info, $location, $nredirects + 1);
+      }
     } else {
       # Auth scheme is w3cstate, but no known cookie yet.
       # $cookies = $self->get_cookies($uri, $user, $password);
@@ -295,9 +306,9 @@ sub request($$$$;$)
       return (400, undef, undef) if !defined $cookies;
       $ua->cookie_jar($cookies);
       $self->{cookies}->{$host_realm} = $cookies;
+      $res = $method eq "GET" ? $ua->get($uri) :
+	  $method eq "HEAD" ? $ua->head($uri) : return (400, undef, undef);
     }
-    $res = $method eq "GET" ? $ua->get($uri) :
-	$method eq "HEAD" ? $ua->head($uri) : return (400, undef, undef);
 
   }
 
