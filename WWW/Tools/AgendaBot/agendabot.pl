@@ -78,7 +78,8 @@
 # A PARTICULAR PURPOSE.
 
 package AgendaBot;
-use lib '.';
+use FindBin;
+use lib "$FindBin::Bin";	# Look for modules in agendabot's directory
 use parent 'Bot::BasicBot::ExtendedBot';
 use strict;
 use warnings;
