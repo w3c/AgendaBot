@@ -192,8 +192,9 @@ sub get_cookies($$$$)
   $res = $ua->head($uri);
   return undef if !$res->is_success && $res->code != 401;
 
-  $self->log($_->request->method . " on " . $_->base) foreach ($res->redirects);
-  $self->log($res->request->method . " on " . $res->base);
+  $self->log("get_cookies: " . $_->request->method . " on " . $_->base)
+      foreach ($res->redirects);
+  $self->log("get_cookies: " . $res->request->method . " on " . $res->base);
 
   # We assume the returned resource is a form with three fields:
   # "_username", "_password" and "_remember_me". If we started with a
@@ -203,14 +204,15 @@ sub get_cookies($$$$)
   # "https://auth.w3.org/" and one to
   # "https://auth.w3.org/loggedin").
   #
-  $self->log("Using " . $res->base);
+  $self->log("get_cookies: Using username $user on " . $res->base );
   $ua->cookie_jar(HTTP::Cookies->new);
   $res = $ua->post($res->base, {'_username' => $user, '_password' => $password,
 				    '_remember_me' => 'on'});
   return undef if !$res->is_success;
 
-  $self->log($_->request->method . " on " . $_->base) foreach ($res->redirects);
-  $self->log($res->request->method . " on " . $res->base);
+  $self->log("get_cookies: " . $_->request->method . " on " . $_->base)
+      foreach ($res->redirects);
+  $self->log("get_cookies: " . $res->request->method . " on " . $res->base);
 
   # Each of the responses set or removed some cookies. Return a hash
   # of the remaining cookies. In the case of auth.w3.org, the response
@@ -297,6 +299,7 @@ sub request($$$$;$)
 	# If we still get a WWW-Authenticate header, the cookies were
 	# wrong. They maybe expired. Remove them and try again,
 	# recursively.
+	$self->log("request: cookie did not work on try $nredirects; delete it and try again");
 	delete $self->{cookies}->{$host_realm};
 	return $self->request($method, $info, $location, $nredirects + 1);
       }
