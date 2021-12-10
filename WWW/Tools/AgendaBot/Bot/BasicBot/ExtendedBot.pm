@@ -313,6 +313,30 @@ sub irc_disconnected_state
 }
 
 
+# irc_said_state -- handle a normal message
+sub irc_said_state
+{
+  irc_received_state( 'said', 'say', @_ );
+  return;
+}
+
+
+# irc_emoted_state -- handle a /me message
+sub irc_emoted_state
+{
+  irc_received_state( 'emoted', 'emote', @_ );
+  return;
+}
+
+
+# irc_noticed_state -- handle a notice
+sub irc_noticed_state
+{
+  irc_received_state( 'noticed', 'emote', @_ );
+  return;
+}
+
+
 # irc_received_state -- handle certain message events
 sub irc_received_state
 {
@@ -357,7 +381,7 @@ sub irc_received_state
   if ($mess->{channel} ne "msg") {
     my $own_nick = $self->nick;
 
-    if ($mess->{body} =~ s/^(\Q$own_nick\E)\b\s*,\s*//i) {
+    if ($mess->{body} =~ s/^(\Q$own_nick\E)\s*,\s*//i) {
       $mess->{address} = $1;
     }
 
