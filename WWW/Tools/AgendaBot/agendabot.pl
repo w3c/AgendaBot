@@ -62,6 +62,9 @@
 #   3-The default value of rendition:flow [3] (15 min)
 #   4-FXL Accessibility (10 min)
 #
+# TODO: An event in the W3C group calendar may also contain a link to
+# an agenda instead of an agenda.
+#
 # TODO: When leaving a channel ("agendabot, bye"), stop any forked
 # processes, not only stop printing the processes' output.
 #
@@ -469,7 +472,7 @@ sub find_agenda_process($$$$$)
   elsif ($period =~ /(\d+) week/) {$oldest = time - 60*60*24*7*$1;}
   else {print STDERR "Bug! find_agenda_process(... \"$period\")\n"; return;}
 
-  # First search all calendars for an agenda for today.
+  # First search in calendars for an agenda for today.
 
   while (scalar(@agenda) < 2 && @calendar_urls) {
     my $calendar = shift @calendar_urls;
@@ -479,7 +482,8 @@ sub find_agenda_process($$$$$)
     # Loop over all date-times and links in the calendar.
     while (scalar(@agenda) < 2 &&
 	   $document =~ /datetime="([0-9T:+-]+)".*?href="([^"]+)"/sg) {
-      next if !$self->time_close_to_current($1, $oldest);
+      # TODO: Also check that the time isn't too far into the future?
+      next if $self->get_date_from_datetime($1) < $oldest;
       $url = URI->new_abs($2, $calendar)->canonical->as_string;
       my ($code, $mediatype, $eventdoc) = $self->get($info, $url);
       next if $code != 200;
@@ -641,7 +645,7 @@ sub handle_find_topics_results
     $self->{topics}->{$channel} = []; # Initalize the list of topics
   } elsif ($type eq '-') {	      # Signals an additional topic
     push @{$self->{topics}->{$channel}}, $text;
-  } elsif ($text eq ')') {	      # Signals the end of the array
+  } elsif ($type eq ')') {	      # Signals the end of the array
     $self->{topics_time}->{$channel} = time; # Add a time stamp
     $n = scalar(@{$self->{topics}->{$channel}});
     if ($n == 0) {
@@ -969,7 +973,7 @@ sub said($$)
 
   return $self->associate_lists_and_calendars($info, $channel, $1)
       if $text =~ /^this\s+is\s+
-      	       	   ([^\s,]+(?:(?:\s*,\s*(?:and\s+)?|\s+and\s+)[^\s,]+)*)\s*$/xi;
+      	       	   ([^\s,]+(?:(?:\s*,\s*(?:and\s+)?|\s+and\s+)[^\s,]+)*)$/xi;
 
   return $self->forget_associations($channel)
       if $text =~ /^forget(?:\s+(?:the\s+)?(?:mailing\s+)?lists?)?$/i;
@@ -1076,11 +1080,15 @@ sub connected($)
 sub log
 {
   my ($self, @messages) = @_;
-  my $now = strftime "%Y-%m-%dT%H:%M:%SZ", gmtime;
 
-  # Prefix all log lines with the current time.
-  #
-  $self->SUPER::log(map($now.' '.$_, @messages)) if $self->{'verbose'};
+  if ($self->{'verbose'}) {
+    # Prefix all log lines with the current time, unless the line
+    # already starts with a time.
+    #
+    my $now = strftime "%Y-%m-%dT%H:%M:%SZ", gmtime;
+    $self->SUPER::log(
+      map /^\d\d\d\d-\d\d-\d\dT\d\d:\d\d:\d\dZ/ ? $_ : "$now $_", @messages);
+  }
 }
 
 
@@ -1239,16 +1247,14 @@ sub read_rejoin_list($)
 }
 
 
-# time_close_to_current -- check if an ISO date-time is close to now
-sub time_close_to_current($$$)
+# get_date_from_datetime -- convert ISO date-time to seconds since epoch
+sub get_date_from_datetime($$)
 {
-  my ($self, $isodate, $oldest) = @_;
+  my ($self, $isodate) = @_;
 
-  # We don't check, but assume the time zone is UTC.
-  $isodate =~ /(\d+)-(\d+)-(\d+)T(\d+):(\d+):(\d+)([+-][\d:]+)/;
-  my $t = DateTime->new(year=>$1, month=>$2, day=>$3, hour=>$4, minute=>$5,
-			second=>$6, time_zone=>$7)->epoch;
-  return $oldest < $t && $t < time + 5 * 60 * 60; # 5 hours in the future
+  $isodate =~ /(\d+)-(\d+)-(\d+)T(\d+):(\d+):(\d+)([+-][\d:]+)/ or return 0;
+  return DateTime->new(year=>$1, month=>$2, day=>$3, hour=>$4, minute=>$5,
+		       second=>$6, time_zone=>$7)->epoch;
 }
 
 
