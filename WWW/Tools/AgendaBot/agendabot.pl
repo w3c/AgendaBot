@@ -798,10 +798,10 @@ sub associate_lists_and_calendars($$$)
       push @list_urls, $list if defined $list;
       my $calendar = $self->find_calendar($info, $x);
       push @calendar_urls, $calendar if defined $calendar;
-      return "I could not find (or not read) an archive or calendar for $x."
-	  if !defined $list && !defined $calendar;
     }
   }
+  return "I could not find (or not read) an archive or calendar for $lists."
+      if !@list_urls && !@calendar_urls;
 
   # Store the associations.
   #
