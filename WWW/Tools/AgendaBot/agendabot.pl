@@ -944,7 +944,7 @@ sub said($$)
 
   # We don't handle other text unless it is addressed to us.
   return $self->SUPER::said($info)
-      if (!$addressed);
+      if !$addressed;
 
   # Remove the optional initial "please" and final period.
   $text =~ s/^please\s*,?\s*//i;
@@ -1418,6 +1418,7 @@ $bot->run();
 
 
 
+=encoding utf8
 
 =head1 NAME
 
@@ -1426,7 +1427,7 @@ agendabot - IRC 'bot that gets a meeting agenda from a URL
 =head1 SYNOPSIS
 
 agendabot [-n I<nick>] [-N I<name>] [-c I<passwordfile>] [-e I<URL>]
-[-m I<mailing-list-file>] [-r rejoin-file] [-C charset] [-v] I<URL>
+[-m I<associations-file>] [-r rejoin-file] [-C charset] [-v] I<URL>
 
 =head1 DESCRIPTION
 
@@ -1437,7 +1438,7 @@ form
 
  agenda: URL
 
-(where URL is some URL) and tries to find a meeting agenda at that
+(where URL is an arbitrary URL) and tries to find a meeting agenda at that
 URL. If it succeeds in finding an agenda, it prints it on IRC in a
 form suitable for the Zakim 'bot, i.e., it prints something like:
 
@@ -1449,62 +1450,57 @@ It tries various parsers in turn to read the document and uses the
 results of the parser that recognized the most agenda topics. (See
 L</"Agenda formats"> below.)
 
+=head2 W3C mail archives and W3C group calendars
+
+You can also tell agendabot to search for agendas in a W3C mail
+archive or a W3C group calendar and let it discover the URL of the
+agenda by itself. First you need to tell agendabot where to search
+with a command such as this:
+
+ agendabot, this is i18n-core
+
+You only need to do this once. Agendabot will find the relevant
+mailing lists and calendars and remember them, even when it
+disconnects and later reconnects to the same channel. Thereafter you
+only need to say
+
+ agendabot, find agenda
+
+and agendabot will respond with the URL of the agenda and the agenda
+itself (or a message that it didn't find any agenda)
+
 =head2 Specifying the IRC server
 
-The I<URL> argument is a URL that specifies the server to connect to.
-It must be of one of the following forms:
+The I<URL> argument specifies the server to connect to. It must be of
+the following form:
 
 =over
 
-=item 1.
-
-irc://I<server>/I<other_text>
-
-=item 2.
-
-irc://I<server>:I<port>/I<other_text>
-
-=item 3.
-
-irc://I<username>:I<password>@I<server>/I<other_text>
-
-=item 4.
-
-irc://I<username>:I<password>@I<server>:I<port>/I<other_text>
-
-=item 5.
-
-ircs://I<server>/I<other_text>
-
-=item 6.
-
-ircs://I<server>:I<port>/I<other_text>
-
-=item 7.
-
-ircs://I<username>:I<password>@I<server>/I<other_text>
-
-=item 8.
-
-ircs://I<username>:I<password>@I<server>:I<port>/I<other_text>
+I<protocol>://I<username>:I<password>@I<server>:I<port>/I<channel>
 
 =back
 
-The I<other_text>, if not empty, is ignored, i.e., if the text
-contains a channel name, agendabot does not automatically join that
-channel.
+But many parts are optional. The I<protocol> must be either "irc" or
+"ircs", the latter for an SSL-encrypted connection.
 
-The prefix "ircs" indicates that the server uses SSL. The I<port>, if
-omitted, defaults to 6667 (for "irc") or 6697 (for "ircs").
+If the I<username> is omitted, the I<password> and the "@" must also
+be omitted. If a I<username> is given, but the I<password> is omitted,
+agendabot will prompt for it. (But if both the ":" and the I<password>
+are omitted, agendabot assumes that no password is needed.)
 
-If the server requires a username and password, they can be be
-inserted before the server name, separated by a colon and ending with
-an at sign.
+The I<server> is required.
 
-If username is given, but the passord is left empty, agendabot will
-prompt for a password. This is useful to avoid that the password is
-visible in the list of running processes or that somebody can read it
-over your shoulder while you type the command.
+If the ":" and the I<port> are omitted, the port defaults to 6667 (for
+irc) or 6697 (for ircs).
+
+If a I<channel> is given, agendabot will join that channel (in
+addition to any channels it rejoins, see the B<-r> option). If the
+I<channel> does not start with a "#" or a "&", agendabot will add a
+"#" itself.
+
+Omitting the password is useful to avoid that the password is visible
+in the list of running processes or that somebody can read it over
+your shoulder while you type the command.
 
 Note that many characters in the username or password must be
 URL-escaped. E.g., a "@" must be written as "%40", ":" must be written
@@ -1541,7 +1537,8 @@ help find".
 
 =item "agendabot, find agenda"
 
-Ask agendabot to look in the mail archives for an agenda. It looks
+Ask agendabot to look in the mail archives and the W3C group calendar
+for an agenda. It looks
 back one week. To search other periods, add a number of days or weeks,
 e.g.: "agendabot, find agenda since 10 days".
 
@@ -1556,24 +1553,36 @@ old. To search other periods, add a number of days or weeks, e.g.,
 
 Ask agendabot to turn the suggested agenda into an actual agenda.
 
-=item "agendabot, this is I<list>" and "agendabot, this is I<URL>"
+=item "agendabot, this is I<name>" and "agendabot, this is I<URL>"
 
-Tell agendabot in what mailing list to search for agendas. The short
+Tell agendabot in what mailing list or calendar to search for
+agendas. The short
 form, e.g., "agendabot, this is style" or "agendabot, this is w3t",
 causes agendabot to guess the URL. In this case, it will find
 ".../Public/www-style/" and ".../Team/w3t". (It may not have access to
 password-protected archives, see the B<-c> option.)
 
+Note that a short name may resolve to multiple mailing lists and
+calendars. E.g., "i18n-core" is the name of a calendar
+"...groups/wg/i18n-core/calendar", and two mailing lists,
+"...Member/member-i18n-core/", and "...Public/public-i18n-core/". If
+agendabot finds too many sources to search in, use the full URLs
+instead.
+
+You may give multiple names and URLs, separated by commas or the word
+"and". E.g.: "agendabot, this is foo and bar". Agendabot will search
+in all given mailing lists and calendars.
+
 =item "agendabot, forget"
 
-Ask agendabot to forget the mailing list for this channel. Subsequent
-"find" and "suggest" commands will fail, until a new mailing list is
-associated with "this is".
+Ask agendabot to forget the mailing lists and calendars for this
+channel. Subsequent "find" and "suggest" commands will fail, until a
+new mailing list or calendar is set with the "this is" command.
 
 =item "agendabot, status"
 
-Ask agendabot to display the URL of the mailing list where it searches
-for agendas.
+Ask agendabot to display the URL of the mailing lists and calendars
+where it searches for agendas.
 
 =back
 
@@ -1584,7 +1593,7 @@ Stop it with Control-C or the kill(1) command.
 
 =head2 Agenda formats
 
-Agendabot currently recognizes agenda written in one of the following
+Agendabot currently recognizes agendas written in one of the following
 forms. The document in which the agenda sits may be plain text, XHTML,
 HTML, HTML5, XML (text/xml only), or any text format that is close to
 plain text.
@@ -1650,7 +1659,7 @@ results in the following agenda:
  agenda+ TPAC registration
  agenda+ Next meeting
 
-=item 5.
+=item 4.
 
 This format has the word "Agenda" somewhere in the text and there may
 be topics and subtopics, which start with start with a "1)", "1.",
@@ -1733,20 +1742,23 @@ that start with "# " are ignored. E.g.:
 The file with exceptions may itself be password-protected. Note that
 it is a URL, not a file name. To refer to a local file, use a "file:".
 
-=item B<-m> I<mailing-lists-file>
+=item B<-m> I<associations-file>
 
-When IRC channels are associated with mailing lists (so that agendabot
+When IRC channels are associated with mailing lists and calendars (so
+that agendabot
 knows which archives to search for agendas), those associations are
 stored in a file. This way, when agendabot is restarted, it still
 knows the associations. This option specifies the file. The default is
 agendabot.assoc.
 
-The file contains lines consisting of a channel name, a tab and a
-space-separated list of URLs. Empty lines are ignored and lines that
+The file contains lines consisting of three parts separated by tabs: a
+channel name, a space-separated list of URLs, and the type of the
+association (mailing list or calendar). Empty lines are ignored and
+lines that
 start with "#" but not with a valid channel name are considered
 comments and are also ignored. But note that the file will be
 overwritten and the comments will be lost as soon as agendabot
-receives a new mailing list association on IRC.
+receives a new mailing list or calendar association on IRC.
 
 =item B<-r> I<rejoin-file>
 
@@ -1783,6 +1795,9 @@ The current parsers in agendabot will try to parse any other text/*
 format as if it was plain text, which may give strange results. E.g.,
 text/enriched may have formatting codes such as E<lt>bold> or
 E<lt>italic>, which are not removed.
+
+The online manual hasn't been written yet. Use this manual or the
+/help command instead.
 
 =head1 NOTES
 
