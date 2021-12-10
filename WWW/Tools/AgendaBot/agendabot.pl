@@ -141,7 +141,7 @@ sub load($)
 
   if (($errmsg = $self->read_passwords_file())) {$self->log($errmsg);}
   elsif (($errmsg = $self->read_security_exceptions())) {$self->log($errmsg);}
-  elsif (($errmsg = $self->read_mailing_lists())) {$self->log($errmsg);}
+  elsif (($errmsg = $self->read_associations())) {$self->log($errmsg);}
   return $errmsg;
 }
 
@@ -368,6 +368,10 @@ sub parse_and_print_agenda($$$)
     # $self->log("Extracting the mail body");
     $document =~ s/.*(<pre id="body">.*<\/pre>).*/$1/s;
     $plaintext = html_to_text($document);
+  } elsif ($uri =~ /^https:\/\/www\.w3\.org\/events\/meetings\//i) {
+    # It is an event from the group calendar, remove the footer.
+    $document =~ s/<h2 id="(?:join|participants)">.*//s;
+    $plaintext = html_to_text($document);
   } else {
     # If it is an HTML or XML document, render it to plain text. Some of
     # the parsers only handle plain text.
@@ -396,18 +400,23 @@ sub parse_and_print_agenda($$$)
 
 
 # get_subject_and_date -- get the subject and date from an archived message
-sub get_subject_and_date($$)
+sub get_subject_and_date($$$)
 {
-  my ($self, $doc) = @_;
-  my ($subject, $date) = ("", time); # Default is no subject and current time
+  my ($self, $doc, $url) = @_;
+  my ($subject, $date);
 
   $subject = decode_entities($1)
       if $doc =~ /<meta name="Subject" content="(.*?)"/;
-  # TODO: handle errors in new().
-  $date = DateTime->new(year => $1, month => $2, day => $3)->epoch
-      if $doc =~ /<meta name="Date" content="(\d+)-(\d\d)-(\d\d)/;
 
-  return ($subject, $date);
+  # Get the date from a <meta> tag, or from the URL.
+  # TODO: handle errors in new().
+  if ($doc =~ /<meta name="Date" content="(\d+)-(\d\d)-(\d\d)/) {
+    $date = DateTime->new(year => $1, month => $2, day => $3)->epoch;
+  } elsif ($url =~ m|^https://lists.w3.org/Archives/[^/]+/[^/]+/([0-9]{4})|) {
+    $date = DateTime->new(year => $1, month => 12, day => 31)->epoch;
+  }
+
+  return ($subject // "", $date // time);
 }
 
 
@@ -446,25 +455,56 @@ sub promising_subject($)
 # find_agenda_process -- find an agenda in recent email (background process)
 sub find_agenda_process($$$$$)
 {
-  my ($body, $self, $info, $lists, $period) = @_;
+  my ($body, $self, $info, $lists, $calendars, $period) = @_;
+
+  my @calendar_urls = split(/ /, $calendars);
   my @urls = split(/ /, $lists);
   my $channel = $info->{channel};
   my (@agenda, $url, $oldest, %seen, $plaintext);
-  my ($tries, $maxtries) = (0, LIMIT); # Max downloads if $period is "1 day"
 
   binmode(STDOUT, ":utf8");
   binmode(STDERR, ":utf8");
 
-  if ($period =~ /(\d+) day/) {$maxtries *= $1; $oldest = time - 60*60*24*$1;}
-  elsif ($period =~ /(\d+) week/) {$maxtries *= 7*$1; $oldest = 60*60*24*7*$1;}
+  if ($period =~ /(\d+) day/) {$oldest = time - 60*60*24*$1;}
+  elsif ($period =~ /(\d+) week/) {$oldest = time - 60*60*24*7*$1;}
   else {print STDERR "Bug! find_agenda_process(... \"$period\")\n"; return;}
 
+  # First search all calendars for an agenda for today.
+
+  while (scalar(@agenda) < 2 && @calendar_urls) {
+    my $calendar = shift @calendar_urls;
+    my ($code, $mediatype, $document) = $self->get($info, $calendar);
+    next if $code != 200;
+
+    # Loop over all date-times and links in the calendar.
+    while (scalar(@agenda) < 2 &&
+	   $document =~ /datetime="([0-9T:+-]+)".*?href="([^"]+)"/sg) {
+      next if !$self->time_close_to_current($1, $oldest);
+      $url = URI->new_abs($2, $calendar)->canonical->as_string;
+      my ($code, $mediatype, $eventdoc) = $self->get($info, $url);
+      next if $code != 200;
+
+      # Remove the joining instructions and the rest.
+      $document =~ s/<h2 id="(?:join|participants)">.*//s;
+      $plaintext = html_to_text($eventdoc);
+
+      # Try each of the parsers until one returns two or more agenda items.
+      for my $parser (@parsers) {
+	my @h = &$parser($mediatype, $eventdoc, $plaintext);
+	if (scalar(@h) > 1) {@agenda = @h; last;}
+      }
+    }
+  }
+
+  # Next try all mailing lists, recursively following links in each archive.
+  # (Unless the calendars already yielded an agenda.)
+
   $seen{$_} = 1 foreach @urls;
-  while (scalar(@agenda) < 2 && @urls && $tries++ < $maxtries) {
+  while (scalar(@agenda) < 2 && @urls) {
     $url = shift @urls;
     my ($code, $mediatype, $document) = $self->get($info, $url);
     next if $code != 200;
-    my ($subject, $date) = $self->get_subject_and_date($document);
+    my ($subject, $date) = $self->get_subject_and_date($document, $url);
     next if $date < $oldest;
     # Add all links from $document that are under $url and not already seen.
     unshift @urls, grep {!$seen{$_}++} $self->find_links($document, $url);
@@ -527,11 +567,13 @@ sub find_agenda($$$)
 {
   my ($self, $info, $period) = @_;
   my $channel = $info->{channel};	# "#channel" or "msg"
+  my $calendars = $self->{calendars}->{$channel};
   my $lists = $self->{mailing_lists}->{$channel};
   my $me = $self->nick();		# Our own name
 
-  return "sorry, I don't know which mailing list is associated with this "
-      . "channel. Try \"$me, help this is\"." if !defined $lists;
+  return "sorry, I don't know which mailing list or calendar is associated " .
+      "with this channel. Try \"$me, help this is\"."
+      if !defined $lists && !defined $calendars;
 
   # If there is already a process running, kill it.
   $self->{find_agenda_process}->kill() if defined $self->{find_agenda_process};
@@ -541,7 +583,7 @@ sub find_agenda($$$)
       $self->forkit({run => \&find_agenda_process,
 		     handler => "handle_find_agenda_results",
 		     channel => $channel,
-		     arguments => [$self, $info, $lists, $period]});
+		     arguments => [$self, $info, $lists, $calendars, $period]});
 
   $self->log("Looking for an agenda for $channel in the background");
   return "OK. This may take a minute...";
@@ -570,7 +612,7 @@ sub find_topics_process($$$$$)
     $url = shift @urls;
     my ($code, $mediatype, $document) = $self->get($info, $url);
     next if $code != 200;
-    my ($subject, $date) = $self->get_subject_and_date($document);
+    my ($subject, $date) = $self->get_subject_and_date($document, $url);
     next if $date < $oldest;
     # Add all links from $document that are under $url and not already seen.
     unshift @urls, grep {!$seen{$_}++} $self->find_links($document, $url);
@@ -668,6 +710,7 @@ sub accept_topics($$)
 }
 
 
+# find_mailing_list_archive -- find the full URL of the mailing list $list_name
 sub find_mailing_list_archive($$$)
 {
   my ($self, $info, $list_name) = @_;
@@ -686,77 +729,124 @@ sub find_mailing_list_archive($$$)
     return $url if $code == 200; # TODO: check that type is HTML
   }
 
-  return $list_name;		# Return the input if no archive found
+  return undef;
 }
 
 
-# write_mailing_list_associations -- write the associations to file
-sub write_mailing_list_associations($)
+# find_calendar -- find the URL of the calendar for the group $name, or undef
+sub find_calendar($$$)
+{
+  my ($self, $info, $group_name) = @_;
+
+  foreach my $base (("https://www.w3.org/groups/wg/",
+		     "https://www.w3.org/groups/ig/",
+		     "https://www.w3.org/groups/cg/",
+		     "https://www.w3.org/groups/bg/")) {
+    my $url = "$base$group_name/calendar";
+    my ($code, $mediatype, $document) = $self->head($info, $url);
+    return $url if $code == 200; # TODO: check that type is HTML
+  }
+
+  return undef;
+}
+
+
+# write_associations -- write the mailing list and calendar associations to file
+sub write_associations($)
 {
   my ($self) = @_;
+  my %assoc;
 
   # Try to write the associations to file.
   #
-  my %assoc = %{$self->{mailing_lists}};
-  open my $fh, ">", $self->{mailing_lists_file} or return 0;
-  print $fh $_, "\t", $assoc{$_}, "\n" foreach keys %assoc;
+  open my $fh, ">", $self->{associations_file} or return 0;
+  %assoc = %{$self->{mailing_lists}};
+  print $fh $_, "\t", $assoc{$_}, "\tmailing list\n" foreach keys %assoc;
+  %assoc = %{$self->{calendars}};
+  print $fh $_, "\t", $assoc{$_}, "\tcalendar\n" foreach keys %assoc;
   return 1;
 }
 
 
-# associate_mailing_lists -- define the mail archives to search in
-sub associate_mailing_lists($$$)
+# associate_lists_and_calendars -- define the mail archives to search in
+sub associate_lists_and_calendars($$$)
 {
   my ($self, $info, $channel, $lists) = @_;
-  my ($urls, $sep) = ("", "");
+  my (@list_urls, @calendar_urls);
 
   # Split the list of mailing lists and, if they are not already URLs,
   # try to find their URLs. Concatenate the URLs. If no URL could be
   # found for one of the mailing list names, return an error message.
   #
-  foreach my $x (split(/\s*,\*|\s+and\s+/i, $lists)) {
-    $x = $self->find_mailing_list_archive($info, $x) if $x !~ /^https?:\/\//i;
-    return "I could not find (or not read) the archive for $x."
-	if $x !~ /^https?:\/\//i;
-    $urls .= $sep . $x;
-    $sep = " ";
+  foreach my $x (split(/\s*,\s*|\s+and\s+/i, $lists)) {
+    if ($x =~ /^https:\/\/lists\.w3\.org\//i) {
+      # Looks like a the full URL of a mailing list.
+      push @list_urls, $x;
+    } elsif ($x =~ /^https:\/\/www\.w3\.org\/groups\//i) {
+      # Looks like the calendar of a group.
+      push @calendar_urls, $x;
+    } elsif ($x =~ /^https:\/\//i) {
+      # Looks like a full URL, guess that it is like a mailing list.
+      push @list_urls, $x;
+    } else {
+      # Try if it is the name of a mailing list or group, or maybe both.
+      my $list = $self->find_mailing_list_archive($info, $x);
+      push @list_urls, $list if defined $list;
+      my $calendar = $self->find_calendar($info, $x);
+      push @calendar_urls, $calendar if defined $calendar;
+      return "I could not find (or not read) an archive or calendar for $x."
+	  if !defined $list && !defined $calendar;
+    }
   }
 
   # Store the associations.
   #
-  $self->{mailing_lists}->{$channel} = $urls;
-  $self->log("New association: $channel -> $urls");
+  $self->{mailing_lists}->{$channel} = join(' ', @list_urls);
+  $self->{calendars}->{$channel} = join(' ', @calendar_urls);
+  $self->log("New association: $channel -> $_") foreach @calendar_urls;
+  $self->log("New association: $channel -> $_") foreach @list_urls;
 
   # Try to write the associations to file.
   #
-  my $result = $self->write_mailing_list_associations;
-  $self->log("Writing to $self->{mailing_lists_file} failed") if !$result;
+  my $result = $self->write_associations;
+  $self->log("Writing to $self->{associations_file} failed") if !$result;
   return "I could not write a file. The new mailing list association "
       . "will be lost when I am restarted. Sorry." if !$result;
-  return "OK, using $urls";
+  my $s = join(', ', @calendar_urls, @list_urls);
+  $s =~ s/, (?=[^ ]*$)/, and /;
+  return "OK, using $s";
 }
 
 
-# forget_mailing_lists -- remove the mail archives to search in
-sub forget_mailing_lists($$)
+# forget_associations -- remove the mail archives to search in
+sub forget_associations($$)
 {
   my ($self, $channel) = @_;
-  my $urls = $self->{mailing_lists}->{$channel};
+  my $lists = $self->{mailing_lists}->{$channel};
+  my $calendars = $self->{calendars}->{$channel};
 
-  return "I already have no mailing list for this channel." if !defined $urls;
+  return "I already have no mailing lists or calendars for this channel."
+      if !defined $lists && !defined $calendars;
 
   # Remove the association.
   #
   delete $self->{mailing_lists}->{$channel};
+  delete $self->{calendars}->{$channel};
   $self->log("Removed associations for $channel");
 
   # Write current associations to file.
   #
-  my $result = $self->write_mailing_list_associations;
-  $self->log("Writing to $self->{mailing_lists_file} failed") if !$result;
+  my $result = $self->write_associations;
+  $self->log("Writing to $self->{associations_file} failed") if !$result;
   return "I could not write a file. The new mailing list association "
       . "will be lost when I am restarted. Sorry." if !$result;
-  return "OK, I removed the mailing list" . ($urls =~ / / ? "s." : ".");
+  return "OK, I removed" .
+      (defined $lists && $lists !~ / / ? " the mailing list" : "") .
+      (defined $lists && $lists =~ / / ? " the mailing lists" : "") .
+      (defined $lists && defined $calendars ? " and" : "") .
+      (defined $calendars && $calendars !~ / / ? " the calendar" : "") .
+      (defined $calendars && $calendars =~ / / ? " the calendars" : "") .
+      ".";
 }
 
 
@@ -764,11 +854,29 @@ sub forget_mailing_lists($$)
 sub status($$)
 {
   my ($self, $channel) = @_;
-  my $urls = $self->{mailing_lists}->{$channel};
+  my $lists = $self->{mailing_lists}->{$channel};
+  my $calendars = $self->{calendars}->{$channel};
+  my $s = "";
 
-  return "I know no mailing list for this channel." if !defined $urls;
-  return "the mailing list for this channel is $urls" if $urls !~ / /;
-  return "the mailing lists for this channel are " . ($urls =~ s/ /, /gr );
+  return "I know no mailing list or calendars for this channel."
+      if !defined $lists && !defined $calendars;
+
+  if (defined $lists) {
+    if ($lists !~ / /) {
+      $s .= "the mailing list for this channel is $lists";
+    } else {
+      $s .= "the mailing lists for this channel are " . ($lists =~ s/ /, /gr );
+    }
+    $s .= " and " if defined $calendars;
+  }
+  if (defined $calendars) {
+    if ($calendars !~ / /) {
+      $s .= "the calendar for this channel is $calendars";
+    } else {
+      $s .= "the calendars for this channel are " . ($calendars =~ s/ /, /gr );
+    }
+  }
+  return $s;
 }
 
 
@@ -859,11 +967,11 @@ sub said($$)
   return $self->accept_topics($channel)
       if $text =~ /^(?:accept|confirm)(?:\s+the|\s+this)?(?:agenda)?/i;
 
-  return $self->associate_mailing_lists($info, $channel, $1)
+  return $self->associate_lists_and_calendars($info, $channel, $1)
       if $text =~ /^this\s+is\s+
-      	       	   ([^\s,]+(?:(?:\s*,\s*(?:and\s+)?|\s+and\s+)[^\s,])*)$/xi;
+      	       	   ([^\s,]+(?:(?:\s*,\s*(?:and\s+)?|\s+and\s+)[^\s,]+)*)\s*$/xi;
 
-  return $self->forget_mailing_lists($channel)
+  return $self->forget_associations($channel)
       if $text =~ /^forget(?:\s+(?:the\s+)?(?:mailing\s+)?lists?)?$/i;
 
   return $self->status($channel)
@@ -930,19 +1038,21 @@ sub help($$)
       if $text =~ /^this\s+is/i;
 
   return "if you say \"$me, forget mailing list\" (or \"forget the "
-      . "mailing lists\"), I will no longer use any mailing lists to "
+      . "mailing lists\" or \"forget calendars\" or \"forget associations\"), "
+      . "I will no longer use any mailing lists or calendars to "
       . "search for agendas. The \"find\" and \"suggest\" commands "
       . "will no longer work (but \"agenda:\" still does). Use the "
-      . "\"this is\" command to associate a new mailing list."
+      . "\"this is\" command to associate a new mailing list or calendar."
       if $text =~ /^forget/i;
 
   return "if you say \"$me, status?\" (or \"$me, info\"), I will "
-      . "show the URL of the mailing list archive where I look "
+      . "show the URLs of the mailing list archives and calendars where I look "
       . "for agendas."
       if $text =~ /^status|info/i;
 
   return "if you say \"$me, bye\", I will leave this channel. "
-      . "I will continue to remember any associated mailing lists and "
+      . "I will continue to remember any associated mailing lists, "
+      . "calendars and "
       . "suggested agenda topics, in case you /invite me back."
       if $text =~ /^bye/i;
 
@@ -1067,18 +1177,19 @@ sub read_security_exceptions($)
 }
 
 
-# read_mailing_lists -- read the associations channel -> mailing lists
-sub read_mailing_lists($)
+# read_associations -- read the mailing lists and calendars for each channel
+sub read_associations($)
 {
   my ($self) = @_;
-  my $path = $self->{mailing_lists_file};
-  my ($fh, %assoc);
+  my $path = $self->{associations_file};
+  my ($fh, %lists, %calendars);
 
-  return "Bug: No file defined for storing mailing list associations."
+  return "Bug: No file defined for storing mailing lists and calendars."
       if !defined $path;
 
   # Open $path, if it exists. Each line consists of a channel name, a
-  # tab and a space-separated list of URLs. Empty lines are
+  # tab, a space-separated list of URLs, another tab and the type
+  # (mailing list or calendar). Empty lines are
   # ignored. Lines that consist of a "#" that is not followed by a
   # letter or digit are comment lines and are also ignored.
   #
@@ -1087,16 +1198,21 @@ sub read_mailing_lists($)
       chomp;
       if (/^$/ || /^#$/ || /^#[^a-zA-Z0-9_-]/) {
 	next;
-      } elsif (/^([#&][^\t]+)\t(.*)$/) {
-	$assoc{$1} = $2;
+      } elsif (/^([#&][^\t]+)\t(.*)\tmailing list$/) {
+	$lists{$1} = $2;
+      } elsif (/^([#&][^\t]+)\t(.*)\tcalendar$/) {
+	$calendars{$1} = $2;
       } else {
-	return "$path:$.: Syntax error: line does not have a channel name and URL(s)."
+	return "$path:$.: Syntax error: line should have a channel name, one or more URLs and a type."
       }
     }
   }
-  $self->{mailing_lists} = \%assoc;
+  $self->{mailing_lists} = \%lists;
+  $self->{calendars} = \%calendars;
   $self->log("Restore association: $_ -> " . $self->{mailing_lists}->{$_})
       foreach (keys %{$self->{mailing_lists}});
+  $self->log("Restore association: $_ -> " . $self->{calendars}->{$_})
+      foreach (keys %{$self->{calendars}});
   return undef;			# No errors
 }
 
@@ -1120,6 +1236,19 @@ sub read_rejoin_list($)
     }
   }
   return undef;			# No errors
+}
+
+
+# time_close_to_current -- check if an ISO date-time is close to now
+sub time_close_to_current($$$)
+{
+  my ($self, $isodate, $oldest) = @_;
+
+  # We don't check, but assume the time zone is UTC.
+  $isodate =~ /(\d+)-(\d+)-(\d+)T(\d+):(\d+):(\d+)([+-][\d:]+)/;
+  my $t = DateTime->new(year=>$1, month=>$2, day=>$3, hour=>$4, minute=>$5,
+			second=>$6, time_zone=>$7)->epoch;
+  return $oldest < $t && $t < time + 5 * 60 * 60; # 5 hours in the future
 }
 
 
@@ -1277,7 +1406,7 @@ my $bot = AgendaBot->new(
   passwords_file => $opts{'c'},
   security_exceptions_uri => $opts{'e'},
   verbose => defined $opts{'v'},
-  mailing_lists_file => $opts{'m'} // 'agendabot.assoc');
+  associations_file => $opts{'m'} // 'agendabot.assoc');
 
 $bot->run();
 
