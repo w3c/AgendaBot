@@ -105,7 +105,7 @@ use MIME::Base64;
 
 use constant HOME => 'https://www.w3.org/Tools/AgendaBot';
 use constant MANUAL => 'https://www.w3.org/Tools/AgendaBot/manual.html';
-use constant VERSION => '0.3';
+use constant VERSION => '0.4';
 use constant LIMIT => 20;	# Max # of downloads per day of archives
 use constant MAX_REDIRECTS => 10; # Max # of HTTP redirect
 
