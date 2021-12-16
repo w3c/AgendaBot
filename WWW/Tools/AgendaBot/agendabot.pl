@@ -489,7 +489,8 @@ sub find_agenda_process($$$$$)
       next if $code != 200;
 
       # Remove the joining instructions and the rest.
-      $document =~ s/<h2 id="(?:join|participants)">.*//s;
+      $eventdoc =~ s/<h2 id="(join|participants)".*//s
+	  or print STDERR "Bug? Did not find <h2 id=join or participants\n";
       $plaintext = html_to_text($eventdoc);
 
       # Try each of the parsers until one returns two or more agenda items.
