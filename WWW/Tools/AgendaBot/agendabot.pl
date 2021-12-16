@@ -373,7 +373,8 @@ sub parse_and_print_agenda($$$)
     $plaintext = html_to_text($document);
   } elsif ($uri =~ /^https:\/\/www\.w3\.org\/events\/meetings\//i) {
     # It is an event from the group calendar, remove the footer.
-    $document =~ s/<h2 id="(?:join|participants)">.*//s;
+    $document =~ s/<h2 id="(?:join|participants)">.*//s
+	or $self-log("Bug? Did not find <h2 id=join or participants");
     $plaintext = html_to_text($document);
   } else {
     # If it is an HTML or XML document, render it to plain text. Some of
@@ -1309,7 +1310,15 @@ sub addison_agenda_parser($$$)
   # Topic: AOB?
   # Topic: Radar
   #
-  return () if $plaintext !~ /^\h*=+\h*AGENDA\h*=/mi;
+  # or, in the calendar after conversion to plain text:
+  #
+  # Agenda
+  # ------
+  # Topic: AOB?
+  # Topic: Radar
+  #
+  return () if $plaintext !~ /^\h*=+\h*AGENDA\h*=/mi
+      && $plaintext !~ /^\h*Agenda\n\h*------/mi;
   push @agenda, $1 while $plaintext =~ /^\h*Topic\h*:\h*(.+)/mgi;
   return @agenda;
 }
