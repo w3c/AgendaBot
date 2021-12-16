@@ -1007,7 +1007,8 @@ sub help($$)
       . "agenda for Zakim from that URL."
       if $text =~ /^agenda:?/i;
 
-  return "if you say \"$me, find agenda\", I will scan the mailing list "
+  return "if you say \"$me, find agenda\", I will scan the calendar and "
+      . "mailing list "
       . "for a message that contains an agenda. I also understand "
       . "\"search\", \"search for\" and \"look for\". If I should "
       . "look for messages older than 1 week, add the number of days "
@@ -1031,6 +1032,7 @@ sub help($$)
       if $text =~ /^accept|confirm/i;
 
   return "if you say \"$me, this is xyz\", I will remember the "
+      . "calendar \"group/wg/xyz\" (or similar), and the "
       . "mailing list \"xyz\" (or \"public-xyz\", \"www-xyz\", "
       . "\"member-xyz\", \"w3c-xyz\" or \"team-xyz\" or "
       . "\"w3t-xyz\", whichever "
