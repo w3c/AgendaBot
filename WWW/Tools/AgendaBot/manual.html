@@ -84,13 +84,15 @@ agendabot, agenda: http://example.org/agendas/2018/13</pre>
 
     <p>Instead of pointing agendabot to a specific URL, you can also
       ask it go search for the URL by itself in the mailing list
-      archives. The command is one of these, or similar:
+      archives or the group calendars. The command is one of these, or
+      similar:
 
     <pre class=command>agendabot, find agenda
 agendabot, search for the agenda
 agendabot, please, find the agenda.</pre>
 
-    <p>Agendabot will search the mail archive in the background (this
+    <p>Agendabot will search the calendar and the mail archive in the
+      background (this
       may take several seconds) and then output something like this:
 
     <pre class=example>agenda: http://example.org/archive/foo/2109.html
@@ -102,7 +104,7 @@ agenda+ AOB</pre>
     <p>unless it fails to find an agenda, in which case it will say
       so.
 
-    <p>Agendabot normally searches back one week, but you give an
+    <p>Agendabot normally searches back one week, but you can give an
       explicit number of days or weeks:
 
     <pre class=command>agendabot, find agenda since 3 weeks
@@ -111,7 +113,7 @@ agendabot, find agenda in the last 21 days</pre>
 
     <p>This assumes agendabot already knows which mailing list archive
       to search in. See <a href="#this-is" >‘Associate a mailing list
-      archive’</a> below.
+      archive or calendar’</a> below.
 
     <h3 id=suggest>Propose an agenda</h3>
 
@@ -147,7 +149,8 @@ agendabot, suggest an agenda last 14 days</pre>
 
     <p>Like for the <a href="#find" >‘find’</a> command, this assumes
       agendabot knows in which mailing list to search. See <a
-      href="#this-is" >‘Associate a mailing list archive’</a> below.
+      href="#this-is" >‘Associate a mailing list archive or
+      calendar’</a> below.
 
     <h3 id=accept>Accept a proposed agenda</h3>
 
@@ -162,24 +165,29 @@ agendabot, make this agenda</pre>
     <p>You must accept an agenda <em>within one hour</em> after agendabot
       suggested it.
 
-    <h3 id=this-is>Associate a mailing list archive</h3>
+    <h3 id=this-is>Associate a mailing list archive or calendar</h3>
 
-    <p>To tell agendabot in which mailing list archive to search, use
-      a command like the following. Agendabot will remember the
-      mailing list, even when it leaves the channel. More than one
-      mailing list is also possible: Separate them with commas or the
-      word ‘and’. (But the current version 0.3 of agendabot isn't
-      smart and is likely to give up even before reaching the second
-      list.)
+    <p>To tell agendabot in which mailing list archive or calendar to
+      search, use a command like the following. Agendabot will
+      remember the mailing list and calendar, even when it leaves the
+      channel. More than one mailing list and calendar is also
+      possible: Separate them with commas or the word ‘and’. (But the
+      current version 0.4 of agendabot isn't smart and may give up
+      even before reaching the second list.)
 
     <pre class=command>agendabot, this is abcd
 agendabot, this is https://lists.w3.org/Archives/Public/public-abcd/
+agendabot, this is https://www.w3.org/groups/wg/abcd/calendar
 agendabot, this abcd, efgh and ijkl</pre>
 
-    <p>The short form makes agendabot try the following archives until
-      it finds one that exists:
+    <p>The short form makes agendabot try the following calendars and
+      archives:
 
-    <ol>
+    <ul>
+      <li>https://www.w3.org/groups/wg/abcd
+      <li>https://www.w3.org/groups/ig/abcd
+      <li>https://www.w3.org/groups/cg/abcd
+      <li>https://www.w3.org/groups/bg/abcd
       <li>https://lists.w3.org/Archives/Public/abcd/
       <li>https://lists.w3.org/Archives/Member/abcd/
       <li>https://lists.w3.org/Archives/Team/abcd/
@@ -189,24 +197,40 @@ agendabot, this abcd, efgh and ijkl</pre>
       <li>https://lists.w3.org/Archives/Member/w3c-abcd/
       <li>https://lists.w3.org/Archives/Team/team-abcd/
       <li>https://lists.w3.org/Archives/Team/w3t-abcd/
-    </ol>
+    </ul>
 
-    <p>Password-protected archives are only searched if the current
+    <p>Agendabot will skip any that do not exist and will only search
+      password-protected archives if the current
       channel is a team-only channel or if agendabot's configuration
       contains an exception for the current channel.
 
-    <h3 id=forget>Remove a mailing list</h3>
+    <h3 id=forget>Remove a mailing list or calendar</h3>
 
-    <p>If you want agendabot to forget the mailing list associated
+    <p>If you want agendabot to forget the mailing list(s) associated
       with this channel, say something like:
 
 <pre class=command>agendabot, forget mailing list
 agendabot, please, forget the mailing list
 agendabot, forget the list</pre>
 
-    <h3 id=status>Display the mailing list</h3>
+    <p>Plural ‘lists’ works, too.
 
-    <p>To ask agendabot what mailing list(s) it has associated with
+    <p>To tell agendabot to forget the calendar(s), say something like
+
+    <pre class=command>agendabot, forget calendar
+agendabot, please, forget the calendar</pre>
+
+    <p>Plural ‘calendars’ works, too.
+
+    <p>To forget calendars and lists in one go, use ‘all’, e.g.:
+
+    <pre class=command>agendabot, forget all
+agendabot, please, forget all</pre>
+
+    <h3 id=status>Display the mailing list and calendar</h3>
+
+    <p>To ask agendabot what mailing list(s) and calendar(s) it has
+      associated with
       this channel, say:
 
     <pre class=command>agendabot, status?
@@ -254,8 +278,8 @@ that is close to plain text.</p>
 <ol>
 <li>
 <p>In this format, agenda topics are lines that start with a number
-and a period and are followed by a line starting with at least four
-dashes. E.g.:
+and a period (or some other character) and are followed by a line
+starting with at least four dashes. E.g.:
 
 <pre class=command>1. Welcome
 ----------
@@ -269,7 +293,7 @@ dashes. E.g.:
 <p>Any text before, after or in between these lines is ignored. The
 above results in the following agenda:
 
-<pre>clear agenda
+<pre class=example>clear agenda
 agenda+ Welcome
 agenda+ The apple tree
 agenda+ AOB</pre>
@@ -285,10 +309,24 @@ Topic: AOB?
 
 Topic: Radar</pre>
 
+<p>The word ‘AGENDA’ may also be underlined with dashes:
+
+<pre class=command>Agenda
+------
+Topic: AOB?
+Topic: Radar</pre>
+
+<p>or, if the agenda is in an
+  HTML file, it may be an &lt;h3&gt; element:
+
+<pre class=command>&lt;h3&gt;Agenda&lt;/h3&gt;
+&lt;p&gt;Topic: AOB?
+&lt;p&gt;Topic: Radar</pre>
+
 <p>Any text before, after or in between these lines is ignored. The
 above results in the following agenda:
 
-<pre>clear agenda
+<pre class=example>clear agenda
 agenda+ AOB?
 agenda+ Radar</pre>
 
@@ -314,7 +352,7 @@ are lines that start with "1)", "1.", "*", "•", "◦" or "⁃". If there
 are multiple markers in use, only the one with the smallest indent is
 used. The others are assumed to mark subtopics.
 
-<pre>Agenda telcon 20 July
+<pre class=command>Agenda telcon 20 July
 0. Extra agenda items and other digressions
 1. [css-display] Blockifications
    * Positioning
@@ -324,7 +362,7 @@ used. The others are assumed to mark subtopics.
 <p>Any text before, after or in between these lines is ignored. The
 above results in the following agenda:
 
-<pre>clear agenda
+<pre class=example>clear agenda
 agenda+ Extra agenda items and other digressions
 agenda+ [css-display] Blockifications
 agenda+ [cssom-1] Replace steps of set a CSS declaration</pre>
@@ -339,6 +377,9 @@ Richard Ishida.
       <p>During Geek Week 2020, agendabot was extended to search for
       agendas or agenda topics on its own in mailing lists.
 
+<p>In November 2021, Richard Ishida suggested to also search in W3C
+group calendars, since the calendar system had just been extended with
+an editor to include agendas in events.
 
 <h2>Author</h2>
 
@@ -356,5 +397,5 @@ Richard Ishida.
 href="../../2001/12/zakim-irc-bot.html#agenda" >read (and
 write) agendas in RDF.</a>
 
-<address>Last modified $Date: 2021-01-22 11:32:06 $<br>
+<address>Last modified $Date: 2021-12-17 14:46:54 $<br>
 by $Author: bbos $</address>
