@@ -109,6 +109,9 @@ use constant VERSION => '0.4';
 use constant LIMIT => 20;	# Max # of downloads per day of archives
 use constant MAX_REDIRECTS => 10; # Max # of HTTP redirect
 
+use constant LISTS => 1;	# Bitset for forget_associations()
+use constant CALENDARS => 2;	# Bitset for forget_associations()
+
 
 # Subroutines to try and recognize an agenda. The order is important:
 # If several of them find agenda items, the first one to find more
@@ -374,7 +377,7 @@ sub parse_and_print_agenda($$$)
   } elsif ($uri =~ /^https:\/\/www\.w3\.org\/events\/meetings\//i) {
     # It is an event from the group calendar, remove the footer.
     $document =~ s/<h2 id="(?:join|participants)">.*//s
-	or $self-log("Bug? Did not find <h2 id=join or participants");
+	or $self->log("Bug? Did not find <h2 id=join or participants");
     $plaintext = html_to_text($document);
   } else {
     # If it is an HTML or XML document, render it to plain text. Some of
@@ -824,28 +827,42 @@ sub associate_lists_and_calendars($$$)
 }
 
 
-# forget_associations -- remove the mail archives to search in
-sub forget_associations($$)
+# forget_associations -- remove the mail archives and/or calendars to search in
+sub forget_associations($$$)
 {
-  my ($self, $channel) = @_;
+  my ($self, $channel, $what) = @_;
   my $lists = $self->{mailing_lists}->{$channel};
   my $calendars = $self->{calendars}->{$channel};
 
   return "I already have no mailing lists or calendars for this channel."
       if !defined $lists && !defined $calendars;
+  return "I already have no mailing lists for this channel."
+      if $what == LISTS && !defined $lists;
+  return "I already have no calendars for this channel."
+      if $what == CALENDARS && !defined $calendars;
 
   # Remove the association.
   #
-  delete $self->{mailing_lists}->{$channel};
-  delete $self->{calendars}->{$channel};
-  $self->log("Removed associations for $channel");
+  delete $self->{mailing_lists}->{$channel} if $what & LISTS;
+  delete $self->{calendars}->{$channel} if $what & CALENDARS;
+  $self->log("Removed associations for $channel") if $what == LISTS + CALENDARS;
+  $self->log("Removed calendars for $channel") if $what == CALENDARS;
+  $self->log("Removed mailing lists for $channel") if $what == LISTS;
 
   # Write current associations to file.
   #
   my $result = $self->write_associations;
   $self->log("Writing to $self->{associations_file} failed") if !$result;
-  return "I could not write a file. The new mailing list association "
+  return "I could not write a file. The new associations "
       . "will be lost when I am restarted. Sorry." if !$result;
+  return "OK, I removed" .
+      ($lists !~ / / ? " the mailing list" : "") .
+      ($lists =~ / / ? " the mailing lists" : "") .
+      "." if $what == LISTS;
+  return "OK, I removed" .
+      ($calendars !~ / / ? " the calendar" : "") .
+      ($calendars =~ / / ? " the calendars" : "") .
+      "." if $what == CALENDARS;
   return "OK, I removed" .
       (defined $lists && $lists !~ / / ? " the mailing list" : "") .
       (defined $lists && $lists =~ / / ? " the mailing lists" : "") .
@@ -977,8 +994,14 @@ sub said($$)
       if $text =~ /^this\s+is\s+
       	       	   ([^\s,]+(?:(?:\s*,\s*(?:and\s+)?|\s+and\s+)[^\s,]+)*)$/xi;
 
-  return $self->forget_associations($channel)
+  return $self->forget_associations($channel, LISTS | CALENDARS)
+      if $text =~ /^forget(?:\s+all?)?$/i;
+
+  return $self->forget_associations($channel, LISTS)
       if $text =~ /^forget(?:\s+(?:the\s+)?(?:mailing\s+)?lists?)?$/i;
+
+  return $self->forget_associations($channel, CALENDARS)
+      if $text =~ /^forget(?:\s+(?:the\s+)?calendars?)?$/i;
 
   return $self->status($channel)
       if $text =~ /^(?:status|info)\s*\??$/i;
