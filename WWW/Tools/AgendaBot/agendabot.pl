@@ -71,7 +71,7 @@
 # Created: 2018-07-09
 # Author: Bert Bos <bert@w3.org>
 #
-# Copyright © 2018-2021 World Wide Web Consortium, (Massachusetts Institute
+# Copyright © 2018-2022 World Wide Web Consortium, (Massachusetts Institute
 # of Technology, European Research Consortium for Informatics and
 # Mathematics, Keio University, Beihang). All Rights Reserved. This
 # work is distributed under the W3C® Software License
@@ -1423,7 +1423,6 @@ $host = $4;
 $port = $5 // ($ssl ? 6697 : 6667);
 $channel = $6 =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/egr if defined $6;
 $channel = '#' . $channel if defined $channel && $channel !~ /^[#&]/;
-# TODO: Do something with any passed channel name
 # TODO: Do something with other parameters, such as a key
 if (defined $user && !defined $password) {
   print "IRC password for user \"$user\": ";
@@ -1830,9 +1829,6 @@ The current parsers in agendabot will try to parse any other text/*
 format as if it was plain text, which may give strange results. E.g.,
 text/enriched may have formatting codes such as E<lt>bold> or
 E<lt>italic>, which are not removed.
-
-The online manual hasn't been written yet. Use this manual or the
-/help command instead.
 
 =head1 NOTES
 
