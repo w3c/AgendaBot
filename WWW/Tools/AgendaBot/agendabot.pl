@@ -55,6 +55,11 @@
 # TODO: Automatically start looking for an agenda when Zakim joins the
 # channel?
 #
+# TODO: Agendabot doesn't find the agenda in
+# https://lists.w3.org/Archives/Team/w3t-comm/2022Jan/0059.html but
+# the list of links added by hypermail. Explicitly ignore those? Look
+# inside quoted text?
+#
 # TODO: The EPUB3 WG (Dave Cramer and Wendy Reid) write agendas like this:
 #   Topic (time)
 #   1-Clarify language tag values [1] (15 min)
@@ -214,6 +219,7 @@ sub get_cookies($$$$)
   $ua->cookie_jar(HTTP::Cookies->new);
   $res = $ua->post($res->base, {'_username' => $user, '_password' => $password,
 				    '_remember_me' => 'on'});
+  $self->log("get_cookies: ".$res->code." on ".$res->base) if !$res->is_success;
   return undef if !$res->is_success;
 
   $self->log("get_cookies: " . $_->request->method . " on " . $_->base)
