@@ -108,9 +108,9 @@ use Encode qw(encode decode);
 use Digest::SHA qw(sha256);
 use MIME::Base64;
 
-use constant HOME => 'https://www.w3.org/Tools/AgendaBot';
-use constant MANUAL => 'https://www.w3.org/Tools/AgendaBot/manual.html';
-use constant VERSION => '0.4';
+use constant HOME => 'https://github.com/w3c/AgendaBot';
+use constant MANUAL => 'https://w3c.github.io/AgendaBot/manual.html';
+use constant VERSION => '0.5';
 use constant LIMIT => 20;	# Max # of downloads per day of archives
 use constant MAX_REDIRECTS => 10; # Max # of HTTP redirect
 
