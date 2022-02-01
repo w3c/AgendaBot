@@ -3,6 +3,12 @@ agendabot is an IRC 'bot that watches for lines of the form
     agenda: URL
 
 and tries to extract a meeting agenda from the document at that URL.
+If you say
+
+    agendabot, find agenda
+
+it will try to find the URL by itself.
+
 It writes the agenda back to the IRC channel in a form understood by
 Zakim[1].
 
