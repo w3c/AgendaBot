@@ -364,7 +364,7 @@ sub parse_and_print_agenda($$$)
   my $channel = $info->{channel};
   my $who = $info->{who};
   my @agenda = ();
-  my ($code, $type, $document, $plaintext);
+  my ($code, $type, $document, $plaintext, $rawuri);
 
   # Try to download the resource.
   #
@@ -385,6 +385,11 @@ sub parse_and_print_agenda($$$)
     $document =~ s/<h2 id="(?:join|participants)">.*//s
 	or $self->log("Bug? Did not find <h2 id=join or participants");
     $plaintext = html_to_text($document);
+  } elsif ($uri =~ /^https:\/\/github\.com\/([^\/]+)\/([^\/]+)\/blob\/(.*\.md)$/i) {
+    # It is a markdown agenda in a github repo
+    # Retrieve the text/plain version
+    $rawuri = "https://github.com/$1/$2/raw/$3";
+    return parse_and_print_agenda($self, $info, $rawuri);
   } else {
     # If it is an HTML or XML document, render it to plain text. Some of
     # the parsers only handle plain text.
@@ -1397,7 +1402,7 @@ sub two_level_agenda_parser($$$)
 
   # Store the least indented marker in $delim, if any.
   #
-  foreach my $d (qr/\d+\)/, qr/\d+\./, qr/\*/, qr/-/, qr/•/, qr/◦/, qr/⁃/) {
+  foreach my $d (qr/\d+\)/, qr/\d+\./, qr/\*/, qr/-/, qr/•/, qr/◦/, qr/⁃/, qr/#+/) {
     if ($plaintext =~ /^(\h*)$d\h/m && length $1 < $i) {
       $i = length $1;
       $delim = $d
