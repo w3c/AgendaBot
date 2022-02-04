@@ -55,23 +55,15 @@
 # TODO: Automatically start looking for an agenda when Zakim joins the
 # channel?
 #
-# TODO: Agendabot doesn't find the agenda in
-# https://lists.w3.org/Archives/Team/w3t-comm/2022Jan/0059.html but
-# the list of links added by hypermail. Explicitly ignore those? Look
-# inside quoted text?
-#
-# TODO: The EPUB3 WG (Dave Cramer and Wendy Reid) write agendas like this:
-#   Topic (time)
-#   1-Clarify language tag values [1] (15 min)
-#   2-Missing conformance criteria around item properties? [2] (15 min)
-#   3-The default value of rendition:flow [3] (15 min)
-#   4-FXL Accessibility (10 min)
-#
 # TODO: An event in the W3C group calendar may also contain a link to
 # an agenda instead of an agenda.
 #
 # TODO: When leaving a channel ("agendabot, bye"), stop any forked
 # processes, not only stop printing the processes' output.
+#
+# TODO: When contents_to_text() encounters <math>, it just copies the
+# text. It should convert it to LaTeX, or, if some day scribe.perl
+# accepts literal HTML, copy it as MathML.
 #
 # Created: 2018-07-09
 # Author: Bert Bos <bert@w3.org>
@@ -107,6 +99,7 @@ use POE;			# For OBJECT, ARG0 and ARG1
 use Encode qw(encode decode);
 use Digest::SHA qw(sha256);
 use MIME::Base64;
+use HTML::TreeBuilder 5 -weak;
 
 use constant HOME => 'https://github.com/w3c/AgendaBot';
 use constant MANUAL => 'https://w3c.github.io/AgendaBot/manual.html';
@@ -127,7 +120,9 @@ my @parsers = (
   \&bb_agenda_parser,
   \&addison_agenda_parser,
   \&koalie_and_plh_agenda_parser,
-  \&two_level_agenda_parser);
+  \&html_list_agenda_parser,
+  \&two_level_agenda_parser,
+  \&quoted_agenda_parser);
 
 
 # init -- initialize some parameters
@@ -378,7 +373,7 @@ sub parse_and_print_agenda($$$)
   if ($uri =~ /^https:\/\/lists\.w3\.org\/Archives\//i) {
     # If it is a page in the mail archive, extract the original mail body.
     # $self->log("Extracting the mail body");
-    $document =~ s/.*(<pre[^>]+class="body">.*<\/pre>).*/$1/s;
+    $document =~ s/.*(<pre[^>]+id="body">.*<\/pre>).*/$1/s;
     $plaintext = html_to_text($document);
   } elsif ($uri =~ /^https:\/\/www\.w3\.org\/events\/meetings\//i) {
     # It is an event from the group calendar, remove the footer.
@@ -395,7 +390,7 @@ sub parse_and_print_agenda($$$)
   # agenda of two or more items. Otherwise use the first one that
   # returned one item.
   for my $parser (@parsers) {
-    my @h = &$parser($type, $document, $plaintext // $document);
+    my @h = &$parser($type, $document, $plaintext // $document, $uri);
     @agenda = @h if scalar(@h) > 0;
     last if scalar(@h) > 1;
   }
@@ -470,7 +465,7 @@ sub find_agenda_process($$$$$)
 {
   my ($body, $self, $info, $lists, $calendars, $period) = @_;
 
-  my @calendar_urls = split(/ /, $calendars);
+  my @calendar_urls = $calendars ? split(/ /, $calendars) : ();
   my @urls = split(/ /, $lists);
   my $channel = $info->{channel};
   my (@agenda, $url, $oldest, %seen, $plaintext);
@@ -505,7 +500,7 @@ sub find_agenda_process($$$$$)
 
       # Try each of the parsers until one returns two or more agenda items.
       for my $parser (@parsers) {
-	my @h = &$parser($mediatype, $eventdoc, $plaintext);
+	my @h = &$parser($mediatype, $eventdoc, $plaintext, $url);
 	if (scalar(@h) > 1) {@agenda = @h; last;}
       }
     }
@@ -530,12 +525,12 @@ sub find_agenda_process($$$$$)
 
     # Extract the original mail body from the HTML page.
     # print STDERR "Extracting the mail body\n";
-    $document =~ s/.*(<pre[^>]+class="body">.*<\/pre>).*/$1/s;
+    $document =~ s/.*(<pre[^>]+id="body">.*<\/pre>).*/$1/s;
     $plaintext = html_to_text($document);
 
     # Try each of the parsers until one returns two or more agenda items.
     for my $parser (@parsers) {
-      my @h = &$parser($mediatype, $document, $plaintext);
+      my @h = &$parser($mediatype, $document, $plaintext, $url);
       if (scalar(@h) > 1) {@agenda = @h; last;}
     }
   }
@@ -1312,9 +1307,9 @@ sub html_to_text($)
 
 
 # bb_agenda_parser -- find an agenda written in Bert's agenda style
-sub bb_agenda_parser($$$)
+sub bb_agenda_parser($$$$)
 {
-  my ($mediatype, $document, $plaintext) = @_;
+  my ($mediatype, $document, $plaintext, $url) = @_;
   my @agenda = ();
 
   # Agenda topics have a number and are underlined, e.g.:
@@ -1328,9 +1323,9 @@ sub bb_agenda_parser($$$)
 
 
 # addison_agenda_parser -- find an agenda in Addison Phillips' style
-sub addison_agenda_parser($$$)
+sub addison_agenda_parser($$$$)
 {
-  my ($mediatype, $document, $plaintext) = @_;
+  my ($mediatype, $document, $plaintext, $url) = @_;
   my @agenda = ();
 
   # The agenda looks like:
@@ -1354,9 +1349,9 @@ sub addison_agenda_parser($$$)
 
 
 # koalie_and_plh_agenda_parser -- find an agenda in Coralie's/Philippe's style
-sub koalie_and_plh_agenda_parser($$$)
+sub koalie_and_plh_agenda_parser($$$$)
 {
-  my ($mediatype, $document, $plaintext) = @_;
+  my ($mediatype, $document, $plaintext, $url) = @_;
   my @agenda;
 
   # The agenda already uses Zakim's format, i.e., topics are prefixed
@@ -1370,10 +1365,71 @@ sub koalie_and_plh_agenda_parser($$$)
 }
 
 
-# two_level_agenda_parser -- find an agenda in the style of Axel Polleres
-sub two_level_agenda_parser($$$)
+# contents_to_text -- return content, links as Ivan links, without nested lists
+sub contents_to_text($$);
+sub contents_to_text($$)
 {
-  my ($mediatype, $document, $plaintext) = @_;
+  my ($element, $baseurl) = @_;
+  my $s = '';
+
+  foreach my $child ($element->content_list()) {
+    if ($child->tag() eq '~text') {
+      $s .= $child->attr('text');
+    } elsif ($child->tag() eq 'a' && $baseurl) {
+      $s .= '-> ' . contents_to_text($child, undef) . ' ' .
+	  URI->new_abs($child->attr('href'), $baseurl)->canonical->as_string;
+    } elsif ($child->tag() eq 'b' || $child->tag() eq 'strong') {
+      $s .= ' *' . contents_to_text($child, $baseurl) . '* ';
+    } elsif ($child->tag() eq 'i' || $child->tag() eq 'em') {
+      $s .= ' /' . contents_to_text($child, $baseurl) . '/ ';
+    } elsif ($child->tag() eq 'u') {
+      $s .= ' _' . contents_to_text($child, $baseurl) . '_ ';
+    } elsif ($child->tag() eq 'code' || $child->tag() eq 'code') {
+      $s .= ' `' . contents_to_text($child, $baseurl) . '` ';
+    } elsif ($child->tag() ne 'ol' && $child->tag() ne 'ul') {
+      $s .= contents_to_text($child, $baseurl);
+    }
+  }
+  return $s;
+}
+
+
+# html_list_agenda_parser -- find an agenda as an OL or UL list in HTML
+sub html_list_agenda_parser($$$$)
+{
+  my ($mediatype, $document, $plaintext, $url) = @_;
+  my (@agenda, $tree, $start, $h, $s);
+
+  return () if $mediatype !~ /^text\/html\b/i;
+  $tree = HTML::TreeBuilder->new_from_content($document);
+  $tree->objectify_text();
+
+  # Find the word "agenda", assumed to indicate the start of the agenda.
+  $start = $tree->look_down(_tag=>'~text', text=>qr/\bagenda\b/i);
+  return () if !$start;
+
+  # Find the first OL or UL after $start. Look in right siblings, then
+  # right siblings of the parent, than right siblings of the parent's
+  # parent, etc.
+  while ($start && $start->tag() ne 'ol' && $start->tag() ne 'ul') {
+    until (!$start || ($h = $start->right)) {$start = $start->parent()}
+    $start = $h;
+  }
+  return () if !$start;
+
+  # Convert the list items to text.
+  foreach my $item ($start->content_list()) {
+    push @agenda, contents_to_text($item, $url) if $item->tag() eq 'li';
+  }
+
+  return @agenda;
+}
+
+
+# two_level_agenda_parser -- find an agenda in the style of Axel Polleres
+sub two_level_agenda_parser($$$$)
+{
+  my ($mediatype, $document, $plaintext, $url) = @_;
   my @agenda;
   my $i = 10000;		# Bigger than any expected indent
   my $delim;
@@ -1390,14 +1446,15 @@ sub two_level_agenda_parser($$$)
   #       1) fix call-details for future calls
   #       2) discuss F2F at MyData, how can we reach out broader?
   #
-  return () if $plaintext !~ /\bAgenda\b/i;
+  # return () if $plaintext !~ /\bAgenda\b/i;
 
   # Remove all text before the word "agenda".
   $plaintext =~ s/^.*?\bagenda\b//is;
 
   # Store the least indented marker in $delim, if any.
   #
-  foreach my $d (qr/\d+\)/, qr/\d+\./, qr/\*/, qr/-/, qr/•/, qr/◦/, qr/⁃/) {
+  foreach my $d (qr/\d+\)/, qr/\d+\./, qr/\d+ *-/, qr/\*/, qr/-/, qr/•/,
+    qr/◦/, qr/⁃/) {
     if ($plaintext =~ /^(\h*)$d\h/m && length $1 < $i) {
       $i = length $1;
       $delim = $d
@@ -1406,6 +1463,25 @@ sub two_level_agenda_parser($$$)
   return () if !defined $delim;
   push @agenda, $1 while $plaintext =~ /^\h*$delim\h+(.*)/mg;
   return @agenda;
+}
+
+
+# quoted_agenda_parser -- find an agenda in email that is a quoted with ">"
+sub quoted_agenda_parser($$$$)
+{
+  my ($mediatype, $document, $plaintext, $url) = @_;
+
+  # print STDERR "quoted_agenda_parser\n$plaintext\n";
+
+  # Remove one level of quoting, or return empty if there are no quoted lines.
+  $plaintext =~ s/^> |^>$//mg or return ();
+
+  # Try each of the parsers (including ourselves) on that new plaintext.
+  for my $parser (@parsers) {
+    my @h = &$parser('text/plain', undef, $plaintext, $url);
+    return @h if scalar(@h) > 0;
+  }
+  return ();
 }
 
 
