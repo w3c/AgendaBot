@@ -36,9 +36,6 @@
 # TODO: The list of security exceptions is searched with linear search.
 # That's only fine if the list is short.
 #
-# TODO: Add a way to test the heuristic parsers without connecting to
-# IRC.
-#
 # TODO: The associations of channels with mailing list archives should
 # allow for channels on different IRC networks.
 #
@@ -83,6 +80,7 @@ use lib "$FindBin::Bin";	# Look for modules in agendabot's directory
 use parent 'Bot::BasicBot::ExtendedBot';
 use strict;
 use warnings;
+use feature 'state';
 use LWP;
 use HTTP::Cookies;
 use LWP::ConnCache;
@@ -94,12 +92,12 @@ use utf8;
 use DateTime;
 use URI;
 use HTML::Entities;
-use HTML::FormatText;
 use POE;			# For OBJECT, ARG0 and ARG1
 use Encode qw(encode decode);
 use Digest::SHA qw(sha256);
 use MIME::Base64;
 use HTML::TreeBuilder 5 -weak;
+use open ':encoding(UTF-8)';	# Open all files assuming they are UTF-8
 
 use constant HOME => 'https://github.com/w3c/AgendaBot';
 use constant MANUAL => 'https://w3c.github.io/AgendaBot/manual.html';
@@ -374,16 +372,18 @@ sub parse_and_print_agenda($$$)
     # If it is a page in the mail archive, extract the original mail body.
     # $self->log("Extracting the mail body");
     $document =~ s/.*(<pre[^>]+id="body">.*<\/pre>).*/$1/s;
-    $plaintext = html_to_text($document);
+    $plaintext = html_to_text($document, $uri);
   } elsif ($uri =~ /^https:\/\/www\.w3\.org\/events\/meetings\//i) {
-    # It is an event from the group calendar, remove the footer.
+    # It is an event from the group calendar, remove the footer and
+    # everything before the agenda.
     $document =~ s/<h2 id="(?:join|participants)">.*//s
 	or $self->log("Bug? Did not find <h2 id=join or participants");
-    $plaintext = html_to_text($document);
+    $document =~ s/^.*(?=<h2 id="agenda")//s;
+    $plaintext = html_to_text($document, $uri);
   } else {
     # If it is an HTML or XML document, render it to plain text. Some of
     # the parsers only handle plain text.
-    $plaintext = html_to_text($document) if $type =~ /html|xml/;
+    $plaintext = html_to_text($document, $uri) if $type =~ /html|xml/;
   }
 
   # Try the parsers in order. Stop as soon as a parser returns an
@@ -399,10 +399,16 @@ sub parse_and_print_agenda($$$)
 
   # Print the agenda in Zakim's format.
   #
-  $self->say({channel => $channel, body => "clear agenda"});
-  $self->say({channel => $channel, body => "agenda+ " . $_})
-      foreach (@agenda);
-
+  if (ref $who eq 'GLOB') {	# We are testing (option -o)
+    print $who "agenda: $uri\n";
+    print $who "clear agenda\n";
+    print $who "agenda+ $_\n" foreach (@agenda);
+    print $who "\n";
+  } else {
+    $self->say({channel => $channel, body => "clear agenda"});
+    $self->say({channel => $channel, body => "agenda+ " . $_})
+	foreach (@agenda);
+  }
   return undef;
 }
 
@@ -494,9 +500,11 @@ sub find_agenda_process($$$$$)
       next if $code != 200;
 
       # Remove the joining instructions and the rest.
+      # Remove everything before the agenda.
       $eventdoc =~ s/<h2 id="(join|participants)".*//s
 	  or print STDERR "Bug? Did not find <h2 id=join or participants\n";
-      $plaintext = html_to_text($eventdoc);
+      $eventdoc =~ s/^.*(?=<h2 id="agenda")//s;
+      $plaintext = html_to_text($eventdoc, $url);
 
       # Try each of the parsers until one returns two or more agenda items.
       for my $parser (@parsers) {
@@ -526,7 +534,7 @@ sub find_agenda_process($$$$$)
     # Extract the original mail body from the HTML page.
     # print STDERR "Extracting the mail body\n";
     $document =~ s/.*(<pre[^>]+id="body">.*<\/pre>).*/$1/s;
-    $plaintext = html_to_text($document);
+    $plaintext = html_to_text($document, $url);
 
     # Try each of the parsers until one returns two or more agenda items.
     for my $parser (@parsers) {
@@ -1286,11 +1294,219 @@ sub get_date_from_datetime($$)
 }
 
 
-# html_to_text -- remove tags and expand character entities
-sub html_to_text($)
+# tree_to_text -- recursively render an HTML tree as plain text
+sub tree_to_text($$);
+sub tree_to_text($$)
 {
-  return HTML::FormatText->format_string($_[0],
-      leftmargin => 0, rightmargin => 99999);
+  my ($elt, $status) = @_;
+  state @ul_markers = ('  * ', '  - ', '  + ');
+
+  if (ref $elt eq '' && !$status->{preformatted}) {
+    my $s = $elt =~ s/\s+/ /gr;	     # Collapse white space
+    return if $s eq '' || $s eq ' '; # Only white space; do nothing.
+    my $sep = $s =~ s/^ // || $status->{pending_hspace} ? ' ' : '';
+    $status->{pending_hspace} = scalar($s =~ s/ $//); # Postpone trailing space
+    my @words = split / /, $s;
+    if ($status->{pending_vspace}) { # At start of a paragraph
+      my $word = shift @words;
+      my $marker = $status->{list_counter} && $status->{pending_marker} ?
+	  sprintf($status->{pending_marker}, $status->{list_counter}) :
+	  $status->{pending_marker};
+      $status->{text} .=	     # Add vertical space, indent and marker
+	  "\n" x $status->{pending_vspace} .
+	  ' ' x ($status->{indent} - length($status->{pending_marker})) .
+	  $marker .
+	  $word;
+      $status->{pending_vspace} = 0;
+      $status->{pending_marker} = '';
+      $status->{line_length} = $status->{indent} + length($word);
+      $sep = ' ';
+    }
+    foreach my $word (@words) {
+      if ($status->{line_length} + length($sep) + length($word)
+	> $status->{width}) {
+	$status->{text} .= "\n" . ' ' x $status->{indent};
+	$status->{line_length} = $status->{indent};
+	$sep = '';
+      }
+      $status->{text} .= $sep . $word;
+      $status->{line_length} += length($sep) + length($word);
+      $sep = ' ';
+    }
+
+  } elsif (ref $elt eq '' && $status->{preformatted}) {
+    my @lines = split(/\n/, $elt, -1);
+    return if !scalar @lines;	     # No content; do nothing
+    if ($status->{pending_vspace}) { # At start of a paragraph
+      $status->{text} .=	     # Add vertical space, indent and marker
+	  "\n" x $status->{pending_vspace} .
+	  ' ' x ($status->{indent} - length($status->{pending_marker})) .
+	  $status->{pending_marker};
+      $status->{pending_vspace} = 0;
+      $status->{pending_marker} = '';
+    }
+    $status->{text} .= shift @lines;	# Add first line
+    $status->{text} .= "\n" . ' ' x $status->{indent} . $_ foreach @lines;
+
+  } elsif ($elt->tag() =~ /^h[1-6]$/) {
+    $status->{pending_vspace} = 3;
+    $status->{indent} -= 2;
+    tree_to_text($_, $status) foreach $elt->content_list();
+    $status->{indent} += 2;
+    $status->{pending_vspace} = 2 if $status->{pending_vspace} < 2;
+
+  } elsif ($elt->tag() =~
+    /^(?:p|section|article|address|header|footer|main|dl)$/) {
+    $status->{pending_vspace} = 2 if $status->{pending_vspace} < 2;
+    tree_to_text($_, $status) foreach $elt->content_list();
+    $status->{pending_vspace} = 2 if $status->{pending_vspace} < 2;
+
+  } elsif ($elt->tag() eq 'div') {
+    $status->{pending_vspace} = 1 if $status->{pending_vspace} < 1;
+    tree_to_text($_, $status) foreach $elt->content_list();
+    $status->{pending_vspace} = 1 if $status->{pending_vspace} < 1;
+
+  } elsif ($elt->tag() =~ /^(?:blockquote|figure)$/) {
+    $status->{pending_vspace} = 2 if $status->{pending_vspace} < 2;
+    $status->{indent} += 2;
+    tree_to_text($_, $status) foreach $elt->content_list();
+    $status->{indent} -= 2;
+    $status->{pending_vspace} = 2 if $status->{pending_vspace} < 2;
+
+  } elsif ($elt->tag() =~ /^(?:pre|textarea)$/) {
+    $status->{pending_vspace} = 2 if $status->{pending_vspace} < 2;
+    $status->{indent} += 2;
+    $status->{preformatted} = 1;
+    tree_to_text($_, $status) foreach $elt->content_list();
+    $status->{preformatted} = 0;
+    $status->{indent} -= 2;
+    $status->{pending_vspace} = 2 if $status->{pending_vspace} < 2;
+
+  } elsif ($elt->tag() eq 'dt') {
+    $status->{pending_vspace} = 1 if $status->{pending_vspace} < 1;
+    tree_to_text($_, $status) foreach $elt->content_list();
+    $status->{pending_vspace} = 1 if $status->{pending_vspace} < 1;
+
+  } elsif ($elt->tag() eq 'dd') {
+    $status->{pending_vspace} = 1 if $status->{pending_vspace} < 1;
+    $status->{indent} += 4;
+    tree_to_text($_, $status) foreach $elt->content_list();
+    $status->{indent} -= 4;
+    $status->{pending_vspace} = 1 if $status->{pending_vspace} < 1;
+
+  } elsif ($elt->tag() eq 'ul') {
+    my $save_marker = $status->{pending_marker};
+    my $save_nesting = $status->{ul_nesting};
+    my $save_list_counter = $status->{list_counter};
+    $status->{pending_marker} = $ul_markers[$status->{ul_nesting}];
+    $status->{list_counter} = 0;
+    $status->{ul_nesting} = ($status->{ul_nesting} + 1) % scalar(@ul_markers);
+    $status->{indent} += 4;
+    $status->{pending_vspace} = 2 if $status->{pending_vspace} < 2;
+    tree_to_text($_, $status) foreach $elt->content_list();
+    $status->{pending_vspace} = 2 if $status->{pending_vspace} < 2;
+    $status->{indent} -= 4;
+    $status->{ul_nesting} = $save_nesting;
+    $status->{list_counter} = $save_list_counter;
+    $status->{pending_marker} = $save_marker;
+
+  } elsif ($elt->tag() eq 'ol') {
+    my $save_marker = $status->{pending_marker};
+    my $save_list_counter = $status->{list_counter};
+    $status->{pending_marker} = '%2d. ';
+    $status->{list_counter} = 1;
+    $status->{indent} += 4;
+    $status->{pending_vspace} = 2 if $status->{pending_vspace} < 2;
+    tree_to_text($_, $status) foreach $elt->content_list();
+    $status->{pending_vspace} = 2 if $status->{pending_vspace} < 2;
+    $status->{indent} -= 4;
+    $status->{list_counter} = $save_list_counter;
+    $status->{pending_marker} = $save_marker;
+
+  } elsif ($elt->tag() eq 'li') {
+    my $save_marker = $status->{pending_marker};
+    $status->{pending_vspace} = 1 if $status->{pending_vspace} < 1;
+    tree_to_text($_, $status) foreach $elt->content_list();
+    $status->{list_counter}++ if $status->{list_counter};
+    $status->{pending_marker} = $save_marker;
+    $status->{pending_vspace} = 1 if $status->{pending_vspace} < 1;
+
+  } elsif ($elt->tag() =~ /^(?:head|script)$/) {
+    # Skip.
+
+  } elsif ($elt->tag() eq 'a' && defined $elt->attr('href')) {
+    # TODO: Do we need to handle nested <a> elements?
+    my $url = $elt->attr('href') =~ s/^\s+//r =~ s/\s+$//r;
+    $url = URI->new_abs($url, $status->{base_url})->canonical->as_string;
+    # If the anchor text is not the same as the URL, prefix it with
+    # '->' and append the URL, to create an Ivan link.
+    if ($url ne $elt->as_trimmed_text()) {
+      # TODO: In preformatted text, the first and last space may be too much.
+      $elt->unshift_content(' -> ');
+      $elt->push_content(' ', $url, ' ');
+    }
+    tree_to_text($_, $status) foreach $elt->content_list();
+
+  } elsif ($elt->tag() eq 'option') {
+    $status->{pending_hspace} = 1; # Force a space between option elements
+    tree_to_text($_, $status) foreach $elt->content_list();
+
+  } elsif ($elt->tag() eq 'hr') {
+    $status->{pending_vspace} = 1 if $status->{pending_vspace} < 1;
+    $status->{text} .=
+	"\n" x $status->{pending_vspace} .
+	' ' x $status->{indent} .
+	'--------------------';
+    $status->{pending_vspace} = 1;
+    $status->{pending_marker} = '';
+    $status->{pending_hspace} = 0;
+
+  } elsif ($elt->tag() eq 'br') {
+    $status->{pending_vspace} = 1 if !$status->{pending_vspace};
+
+  } elsif ($elt->tag() eq 'img') {
+    $elt->push_content($elt->attr('alt') // '[image]');
+    tree_to_text($_, $status) foreach $elt->content_list();
+
+  # } elsif ($elt->tag() =~ /^(?:em|i)$/) {
+  #   $elt->unshift_content(' /');
+  #   $elt->push_content('/ ');
+  #   tree_to_text($_, $status) foreach $elt->content_list();
+
+  # } elsif ($elt->tag() =~ /^(?:strong|b)$/) {
+  #   $elt->unshift_content(' *');
+  #   $elt->push_content('* ');
+  #   tree_to_text($_, $status) foreach $elt->content_list();
+
+  # } elsif ($elt->tag() eq 'u') {
+  #   $elt->unshift_content(' _');
+  #   $elt->push_content('_ ');
+  #   tree_to_text($_, $status) foreach $elt->content_list();
+
+  } else {
+    tree_to_text($_, $status) foreach $elt->content_list();
+
+  }
+}
+
+
+# html_to_text -- format HTML as plain text
+sub html_to_text($$)
+{
+  my ($document, $url) = @_;
+  my ($tree, $status);
+
+  $tree = HTML::TreeBuilder->new();
+  $tree->p_strict(1);		# Close P elements automatically
+  $tree->parse_content($document);
+  $tree->elementify();		# Just to protect against bugs
+  $tree->simplify_pres();	# Expand tabs and turn \r\n into \n in <pre>
+  $status = {text => '', pending_hspace => 0, pending_vspace => 1,
+	     pending_marker => '', indent => 2, preformatted => 0,
+	     ul_nesting => 0, base_url => $url, list_counter => 0,
+	     line_length => 0, width => 99999};
+  tree_to_text($tree, $status);
+  return $status->{text};
 }
 
 
@@ -1317,7 +1533,7 @@ sub bb_agenda_parser($$$$)
   # 1. Welcome
   # ----------
   #
-  push @agenda, $1 while $plaintext =~ /^[ \t]*[0-9]+.[ \t]*(.+)\r?\n----/mg;
+  push @agenda, $1 while $plaintext =~ /^\h*[0-9]+.\h*(.+?)\r?\n\h*----/mg;
   return @agenda;
 }
 
@@ -1341,8 +1557,15 @@ sub addison_agenda_parser($$$$)
   # Topic: AOB?
   # Topic: Radar
   #
+  # or (Steven Pemberton's format):
+  #
+  # AGENDA ITEMS
+  # Topic: ACTION-2309: Research xpath3 function definitions (Erik)
+  # Topic: ACTION-2315: Report on event handling in web components (Erik)
+  #
   return () if $plaintext !~ /^\h*=+\h*AGENDA\h*=/mi
-      && $plaintext !~ /^\h*Agenda\n\h*------/mi;
+      && $plaintext !~ /^\h*Agenda\n\h*------/mi
+      && $plaintext !~ /^\h*agenda items/mi;
   push @agenda, $1 while $plaintext =~ /^\h*Topic\h*:\h*(.+)/mgi;
   return @agenda;
 }
@@ -1378,14 +1601,14 @@ sub contents_to_text($$)
     } elsif ($child->tag() eq 'a' && $baseurl) {
       $s .= '-> ' . contents_to_text($child, undef) . ' ' .
 	  URI->new_abs($child->attr('href'), $baseurl)->canonical->as_string;
-    } elsif ($child->tag() eq 'b' || $child->tag() eq 'strong') {
-      $s .= ' *' . contents_to_text($child, $baseurl) . '* ';
-    } elsif ($child->tag() eq 'i' || $child->tag() eq 'em') {
-      $s .= ' /' . contents_to_text($child, $baseurl) . '/ ';
-    } elsif ($child->tag() eq 'u') {
-      $s .= ' _' . contents_to_text($child, $baseurl) . '_ ';
-    } elsif ($child->tag() eq 'code' || $child->tag() eq 'code') {
-      $s .= ' `' . contents_to_text($child, $baseurl) . '` ';
+    # } elsif ($child->tag() eq 'b' || $child->tag() eq 'strong') {
+    #   $s .= ' *' . contents_to_text($child, $baseurl) . '* ';
+    # } elsif ($child->tag() eq 'i' || $child->tag() eq 'em') {
+    #   $s .= ' /' . contents_to_text($child, $baseurl) . '/ ';
+    # } elsif ($child->tag() eq 'u') {
+    #   $s .= ' _' . contents_to_text($child, $baseurl) . '_ ';
+    # } elsif ($child->tag() eq 'code' || $child->tag() eq 'code') {
+    #   $s .= ' `' . contents_to_text($child, $baseurl) . '` ';
     } elsif ($child->tag() ne 'ol' && $child->tag() ne 'ul') {
       $s .= contents_to_text($child, $baseurl);
     }
@@ -1432,7 +1655,8 @@ sub two_level_agenda_parser($$$$)
   my ($mediatype, $document, $plaintext, $url) = @_;
   my @agenda;
   my $i = 10000;		# Bigger than any expected indent
-  my $delim;
+  my $delim;			# The least indented marker
+  my $n = 0;			# The number of occurrences of the marker
 
   # Topics and subtopics with various markers.
   #
@@ -1448,20 +1672,28 @@ sub two_level_agenda_parser($$$$)
   #
   # return () if $plaintext !~ /\bAgenda\b/i;
 
-  # Remove all text before the word "agenda".
-  $plaintext =~ s/^.*?\bagenda\b//is;
+  # If the word "agenda" occurs, remove text before the line that contains it.
+  $plaintext =~ s/^.*?\n(?=[^\n]*\bagenda\b)//is;
 
-  # Store the least indented marker in $delim, if any.
+  # Store the least indented marker in $delim, if any. If several
+  # markers are indented the same, use the one that occurs most often.
   #
-  foreach my $d (qr/\d+\)/, qr/\d+\./, qr/\d+ *-/, qr/\*/, qr/-/, qr/•/,
-    qr/◦/, qr/⁃/) {
-    if ($plaintext =~ /^(\h*)$d\h/m && length $1 < $i) {
-      $i = length $1;
-      $delim = $d
+  foreach my $d (qr/\d+\)/, qr/\d+\.(?:\d+\h)?/, qr/\d+\h*-/, qr/\*\h/,
+    qr/-\h/, qr/•\h/, qr/◦\h/, qr/⁃\h/) {
+    if ($plaintext =~ /^(\h*)$d/m) {
+      my $indent = length $1;
+      my $d1 = $1 . $d;
+      my @matches = $plaintext =~ /^$d1/mg;
+      if ($indent < $i || ($indent == $i && scalar(@matches) > $n)) {
+	$i = $indent;
+	$delim = $d1;
+	$n = scalar @matches;
+      }
     }
   }
   return () if !defined $delim;
-  push @agenda, $1 while $plaintext =~ /^\h*$delim\h+(.*)/mg;
+
+  push @agenda, $1 while $plaintext =~ /^$delim\h*+(.+?)\s*$/mg;
   return @agenda;
 }
 
@@ -1471,10 +1703,8 @@ sub quoted_agenda_parser($$$$)
 {
   my ($mediatype, $document, $plaintext, $url) = @_;
 
-  # print STDERR "quoted_agenda_parser\n$plaintext\n";
-
   # Remove one level of quoting, or return empty if there are no quoted lines.
-  $plaintext =~ s/^> |^>$//mg or return ();
+  $plaintext =~ s/^(\h*)>(?: |$)/$1/mg or return ();
 
   # Try each of the parsers (including ourselves) on that new plaintext.
   for my $parser (@parsers) {
@@ -1491,27 +1721,29 @@ sub quoted_agenda_parser($$$$)
 my (%opts, $ssl, $user, $password, $host, $port, %passwords, $channel);
 
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
-getopts('c:C:e:m:n:N:r:v', \%opts) or die "Try --help\n";
-die "Usage: $0 [options] [--help] irc[s]://server...\n" if $#ARGV != 0;
+getopts('c:C:e:m:n:N:o:r:v', \%opts) or die "Try --help\n";
 
-# The single argument must be an IRC-URL.
-#
-$ARGV[0] =~ m/^(ircs?):\/\/(?:([^:]+):([^@]+)?@)?([^:\/#?]+)(?::([^\/]*))?(?:\/(.*))?$/i or
-    die "Argument must be a URI starting with `irc:' or `ircs:'\n";
-$ssl = $1 eq 'ircs';
-$user = $2 =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/egr if defined $2;
-$password = $3 =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/egr if defined $3;
-$host = $4;
-$port = $5 // ($ssl ? 6697 : 6667);
-$channel = $6 =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/egr if defined $6;
-$channel = '#' . $channel if defined $channel && $channel !~ /^[#&]/;
-# TODO: Do something with other parameters, such as a key
-if (defined $user && !defined $password) {
-  print "IRC password for user \"$user\": ";
-  ReadMode('noecho');
-  $password = ReadLine(0);
-  ReadMode('restore');
-  print "\n";
+if (!$opts{'o'}) {
+  # The single argument must be an IRC-URL.
+  #
+  die "Usage: $0 [options] [--help] irc[s]://server...\n" if $#ARGV != 0;
+  $ARGV[0] =~ m/^(ircs?):\/\/(?:([^:]+):([^@]+)?@)?([^:\/#?]+)(?::([^\/]*))?(?:\/(.*))?$/i or
+      die "Argument must be a URI starting with `irc:' or `ircs:'\n";
+  $ssl = $1 eq 'ircs';
+  $user = $2 =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/egr if defined $2;
+  $password = $3 =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/egr if defined $3;
+  $host = $4;
+  $port = $5 // ($ssl ? 6697 : 6667);
+  $channel = $6 =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/egr if defined $6;
+  $channel = '#' . $channel if defined $channel && $channel !~ /^[#&]/;
+  # TODO: Do something with other parameters, such as a key
+  if (defined $user && !defined $password) {
+    print "IRC password for user \"$user\": ";
+    ReadMode('noecho');
+    $password = ReadLine(0);
+    ReadMode('restore');
+    print "\n";
+  }
 }
 
 my $bot = AgendaBot->new(
@@ -1530,7 +1762,14 @@ my $bot = AgendaBot->new(
   verbose => defined $opts{'v'},
   associations_file => $opts{'m'} // 'agendabot.assoc');
 
-$bot->run();
+if ($opts{'o'}) {
+  open my $fh, ">$opts{'o'}" or die "$opts{'o'}: $?";
+  $bot->parse_and_print_agenda({channel => $opts{'o'}, who => $fh}, $_)
+      foreach @ARGV;
+  close $fh;
+} else {
+  $bot->run();
+}
 
 
 
@@ -1545,12 +1784,15 @@ agendabot - IRC 'bot that gets a meeting agenda from a URL
 agendabot [-n I<nick>] [-N I<name>] [-c I<passwordfile>] [-e I<URL>]
 [-m I<associations-file>] [-r rejoin-file] [-C charset] [-v] I<URL>
 
+agendabot [-o I<outputfile>] [-c I<passwordfile>] [-e I<URL>]
+[-v] I<URL> [I<URL>...]
+
 =head1 DESCRIPTION
 
-Agendabot is an IRC 'bot. It connects to the IRC server given by the
-URL (e.g., "irc://irc.example.org/"), waits until it is /invite'd to
-one or more channels and then watches those channels for lines of the
-form
+Agendabot is an IRC 'bot (unless the B<-o> option is given). It
+connects to the IRC server given by the URL (e.g.,
+"irc://irc.example.org/"), waits until it is /invite'd to one or more
+channels and then watches those channels for lines of the form
 
  agenda: URL
 
@@ -1894,6 +2136,18 @@ IRC server expects. The default is utf8.
 
 Be verbose. Makes the 'bot print a log to standard error output of
 what it is doing.
+
+=item B<-o> I<outputfile>
+
+Agendabot does not connect to
+an IRC server, but downloads the documents that are given as I<URL>
+arguments (there may be more than one) and tries to extract an agenda
+from each of them. Those agendas are then written to the
+I<outputfile>. If I<outputfile> is "-", they are written to the
+standard output.
+
+This option is mainly meant for regression testing of the built-in
+parsers, but may be useful to get an agenda from the command line.
 
 =back
 
