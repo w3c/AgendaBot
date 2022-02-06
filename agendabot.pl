@@ -1599,8 +1599,9 @@ sub contents_to_text($$)
     if ($child->tag() eq '~text') {
       $s .= $child->attr('text');
     } elsif ($child->tag() eq 'a' && $baseurl) {
-      $s .= '-> ' . contents_to_text($child, undef) . ' ' .
-	  URI->new_abs($child->attr('href'), $baseurl)->canonical->as_string;
+      $s .= ' -> ' . contents_to_text($child, undef) . ' ' .
+	  URI->new_abs($child->attr('href'), $baseurl)->canonical->as_string .
+	  ' ';
     # } elsif ($child->tag() eq 'b' || $child->tag() eq 'strong') {
     #   $s .= ' *' . contents_to_text($child, $baseurl) . '* ';
     # } elsif ($child->tag() eq 'i' || $child->tag() eq 'em') {
