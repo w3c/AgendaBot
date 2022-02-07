@@ -348,9 +348,9 @@ agenda+ Next meeting</pre>
 
 <li>
 <p>This format has the word "Agenda" somewhere in the text and topics
-are lines that start with "1)", "1.", "*", "•", "◦" or "⁃". If there
-are multiple markers in use, only the one with the smallest indent is
-used. The others are assumed to mark subtopics.
+are numbered lines or lines that start with "*", "•", "◦" or "⁃". If
+there are multiple levels of lists, only the outer list (the least
+indented one) is used.
 
 <pre class=command>Agenda telcon 20 July
 0. Extra agenda items and other digressions
@@ -366,6 +366,18 @@ above results in the following agenda:
 agenda+ Extra agenda items and other digressions
 agenda+ [css-display] Blockifications
 agenda+ [cssom-1] Replace steps of set a CSS declaration</pre>
+
+<li>
+<p>If the agenda is in an HTML page, agendabot looks for the word
+‘agenda’ and then for a list (<code>&lt;ol&gt;</code>
+or <code>&lt;ul&gt;</code>). E.g.:
+
+<pre class=command>&lt;h2&gt;Agenda&lt;/h2&gt;
+&lt;ol&gt;
+&lt;li&gt;Action items&lt;li&gt;
+&lt;li&gt;Publication schedule&lt;li&gt;
+&lt;li&gt;AOB&lt;li&gt;
+&lt;;/ol&gt;</pre>
 
 </ol>
 
@@ -385,17 +397,21 @@ an editor to include agendas in events.
 
 <p>Bert Bos &#60;bert@w3.org&#62;
 
+<h2>Source</h2>
+
+<p>The <a href="https://github.com/w3c/AgendaBot" >source code</a> is
+on GitHub.
 
 <h2>See also</h2>
 
-<p><a href="../../2001/12/zakim-irc-bot.html"
->Zakim</a>, <a href="../../2002/03/RRSAgent"
+<p><a href="https://www.w3.org/2001/12/zakim-irc-bot.html"
+>Zakim</a>, <a href="https://www.w3.org/2002/03/RRSAgent"
 >RRSAgent</a>, <a href="https://w3c.github.io/scribe2/scribedoc.html"
 >scribe.perl</a></p>
 
 <p>Zakim can <a
-href="../../2001/12/zakim-irc-bot.html#agenda" >read (and
+href="https://www.w3.org/2001/12/zakim-irc-bot.html#agenda" >read (and
 write) agendas in RDF.</a>
 
-<address>Last modified $Date: Tue Feb  1 21:36:18 2022 UTC $<br>
+<address>Last modified $Date: Mon Feb  7 22:46:47 2022 UTC $<br>
 by $Author: Bert Bos $</address>

@@ -400,10 +400,10 @@ sub parse_and_print_agenda($$$)
   # Print the agenda in Zakim's format.
   #
   if (ref $who eq 'GLOB') {	# We are testing (option -o)
-    print $who "agenda: $uri\n";
-    print $who "clear agenda\n";
-    print $who "agenda+ $_\n" foreach (@agenda);
-    print $who "\n";
+    print $who encode('UTF-8', "agenda: $uri\n");
+    print $who encode('UTF-8', "clear agenda\n");
+    print $who encode('UTF-8', "agenda+ $_\n") foreach (@agenda);
+    print $who encode('UTF-8', "\n");
   } else {
     $self->say({channel => $channel, body => "clear agenda"});
     $self->say({channel => $channel, body => "agenda+ " . $_})
@@ -1356,14 +1356,21 @@ sub tree_to_text($$)
     $status->{pending_vspace} = 2 if $status->{pending_vspace} < 2;
 
   } elsif ($elt->tag() =~
-    /^(?:p|section|article|address|header|footer|main|dl)$/) {
+    /^(?:p|section|article|address|header|footer|main|dl|table)$/) {
     $status->{pending_vspace} = 2 if $status->{pending_vspace} < 2;
     tree_to_text($_, $status) foreach $elt->content_list();
     $status->{pending_vspace} = 2 if $status->{pending_vspace} < 2;
 
-  } elsif ($elt->tag() eq 'div') {
+  } elsif ($elt->tag() =~ /^(?:div|dt|tr)$/) {
     $status->{pending_vspace} = 1 if $status->{pending_vspace} < 1;
     tree_to_text($_, $status) foreach $elt->content_list();
+    $status->{pending_vspace} = 1 if $status->{pending_vspace} < 1;
+
+  } elsif ($elt->tag() eq 'dd') {
+    $status->{pending_vspace} = 1 if $status->{pending_vspace} < 1;
+    $status->{indent} += 4;
+    tree_to_text($_, $status) foreach $elt->content_list();
+    $status->{indent} -= 4;
     $status->{pending_vspace} = 1 if $status->{pending_vspace} < 1;
 
   } elsif ($elt->tag() =~ /^(?:blockquote|figure)$/) {
@@ -1381,18 +1388,6 @@ sub tree_to_text($$)
     $status->{preformatted} = 0;
     $status->{indent} -= 2;
     $status->{pending_vspace} = 2 if $status->{pending_vspace} < 2;
-
-  } elsif ($elt->tag() eq 'dt') {
-    $status->{pending_vspace} = 1 if $status->{pending_vspace} < 1;
-    tree_to_text($_, $status) foreach $elt->content_list();
-    $status->{pending_vspace} = 1 if $status->{pending_vspace} < 1;
-
-  } elsif ($elt->tag() eq 'dd') {
-    $status->{pending_vspace} = 1 if $status->{pending_vspace} < 1;
-    $status->{indent} += 4;
-    tree_to_text($_, $status) foreach $elt->content_list();
-    $status->{indent} -= 4;
-    $status->{pending_vspace} = 1 if $status->{pending_vspace} < 1;
 
   } elsif ($elt->tag() eq 'ul') {
     my $save_marker = $status->{pending_marker};
@@ -1447,8 +1442,8 @@ sub tree_to_text($$)
     }
     tree_to_text($_, $status) foreach $elt->content_list();
 
-  } elsif ($elt->tag() eq 'option') {
-    $status->{pending_hspace} = 1; # Force a space between option elements
+  } elsif ($elt->tag() =~ /^(?:option|td|th)$/) {
+    $status->{pending_hspace} = 1; # Force a space between these elements
     tree_to_text($_, $status) foreach $elt->content_list();
 
   } elsif ($elt->tag() eq 'hr') {
