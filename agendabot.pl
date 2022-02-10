@@ -371,7 +371,7 @@ sub parse_and_print_agenda($$$)
   if ($uri =~ /^https:\/\/lists\.w3\.org\/Archives\//i) {
     # If it is a page in the mail archive, extract the original mail body.
     # $self->log("Extracting the mail body");
-    $document =~ s/.*(<pre[^>]+id="body">.*<\/pre>).*/$1/s;
+    $document =~ s/.*(<pre[^>]+(?:class|id)="body">.*<\/pre>).*/$1/s;
     $plaintext = html_to_text($document, $uri);
   } elsif ($uri =~ /^https:\/\/www\.w3\.org\/events\/meetings\//i) {
     # It is an event from the group calendar, remove the footer and
@@ -533,7 +533,7 @@ sub find_agenda_process($$$$$)
 
     # Extract the original mail body from the HTML page.
     # print STDERR "Extracting the mail body\n";
-    $document =~ s/.*(<pre[^>]+id="body">.*<\/pre>).*/$1/s;
+    $document =~ s/.*(<pre[^>]+(?:class|id)="body">.*<\/pre>).*/$1/s;
     $plaintext = html_to_text($document, $url);
 
     # Try each of the parsers until one returns two or more agenda items.
