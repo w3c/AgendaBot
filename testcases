@@ -19,10 +19,10 @@ agenda+ Discuss Security feedback [3]
 
 agenda: https://www.w3.org/events/meetings/d15352a9-86a0-44f4-ab19-7c4aad4d654b/20220309T090000
 clear agenda
-agenda+ Question about resolution on -> issue 110 https://github.com/w3c/audiobooks/issues/110
-agenda+ PR: -> Correcting Errata and adding Change Log https://github.com/w3c/audiobooks/pull/111
+agenda+ Question about resolution on  -> issue 110 https://github.com/w3c/audiobooks/issues/110 
+agenda+ PR:  -> Correcting Errata and adding Change Log https://github.com/w3c/audiobooks/pull/111 
 agenda+ Charter Questions
-agenda+ Requiring TOCs [-> 1 https://github.com/w3c/audiobooks/issues/97] [-> 2 https://github.com/w3c/audiobooks/issues/96]
+agenda+ Requiring TOCs [ -> 1 https://github.com/w3c/audiobooks/issues/97 ] [ -> 2 https://github.com/w3c/audiobooks/issues/96 ]
 
 agenda: https://www.w3.org/events/meetings/baf262b7-7551-4c04-96a0-662d85c35505/20220120T150000
 clear agenda
@@ -42,16 +42,16 @@ agenda+ Next meeting: 7 February
 
 agenda: https://www.w3.org/events/meetings/1d223877-730c-446f-bfa9-2e9222902112/20220203T130000
 clear agenda
-agenda+ -> New Issue Triage https://bit.ly/3ARvtLJ
-agenda+ -> New PR Triage https://bit.ly/3s6LYzD
-agenda+ -> Deep Dive planning https://bit.ly/aria-meaty-topic-candidates
-agenda+ -> Figure out what to do with the DPUB mappings overlap with the ARIA Core spec, in the context of newer implementation differences https://github.com/w3c/aria/issues/1643
-agenda+ -> Is this proposal overcome by events?: Updated spec text to reflect the processing of hidden elements when c… https://github.com/w3c/accname/pull/137
-agenda+ -> Any updates?: Prohibit rowcount and rowindex on rows in treegrid and prohibit posinset and setsize on rows in tables and grids https://github.com/w3c/aria/issues/1303
-agenda+ -> Any Updates?: When is hidden content taken into calculation of name and description? https://github.com/w3c/accname/issues/57
-agenda+ -> Do we have any decisions?: Clarify usage of aria-haspopup https://github.com/w3c/aria/issues/1024
-agenda+ -> Initial aria-textseparation (depends on generic PR being merged) https://github.com/w3c/aria/pull/996
-agenda+ -> 1.3 Blocking issues https://github.com/w3c/aria/labels/1.3-Blocking
+agenda+  -> New Issue Triage https://bit.ly/3ARvtLJ 
+agenda+  -> New PR Triage https://bit.ly/3s6LYzD 
+agenda+  -> Deep Dive planning https://bit.ly/aria-meaty-topic-candidates 
+agenda+  -> Figure out what to do with the DPUB mappings overlap with the ARIA Core spec, in the context of newer implementation differences https://github.com/w3c/aria/issues/1643 
+agenda+  -> Is this proposal overcome by events?: Updated spec text to reflect the processing of hidden elements when c… https://github.com/w3c/accname/pull/137 
+agenda+  -> Any updates?: Prohibit rowcount and rowindex on rows in treegrid and prohibit posinset and setsize on rows in tables and grids https://github.com/w3c/aria/issues/1303 
+agenda+  -> Any Updates?: When is hidden content taken into calculation of name and description? https://github.com/w3c/accname/issues/57 
+agenda+  -> Do we have any decisions?: Clarify usage of aria-haspopup https://github.com/w3c/aria/issues/1024 
+agenda+  -> Initial aria-textseparation (depends on generic PR being merged) https://github.com/w3c/aria/pull/996 
+agenda+  -> 1.3 Blocking issues https://github.com/w3c/aria/labels/1.3-Blocking 
 
 agenda: https://www.w3.org/events/meetings/54fb3c39-8826-418b-bcac-46e112f08535/20220203T090000
 clear agenda
@@ -68,16 +68,16 @@ agenda+ did:keri Method [2] (25 min)
 
 agenda: https://www.w3.org/events/meetings/1e1799a6-f588-4e61-badf-2f595f0cb2ec
 clear agenda
-agenda+ ISSUE: -> duration property when using t= fragment selectors https://github.com/w3c/audiobooks/issues/110
-agenda+ ISSUE: -> Add note about the importance of adding the "duration" property to readingOrder items https://github.com/w3c/audiobooks/issues/108
-agenda+ FEATURE REQUEST: -> Possible requirement for one image per track https://github.com/w3c/audiobooks/issues/106
-agenda+ FEATURE REQUEST: -> Require the format and processing of the table of contents https://github.com/w3c/audiobooks/issues/97
-agenda+ FEATURE REQUEST: -> Requirement for a table of contents https://github.com/w3c/audiobooks/issues/96
-agenda+ FEATURE REQUEST: -> A standard rel value for the primary entry page https://github.com/w3c/audiobooks/issues/78
-agenda+ FEATURE REQUEST: -> Deep Linking for Packaged Audiobooks https://github.com/w3c/audiobooks/issues/76
-agenda+ FEATURE REQUEST: -> Add primary entry page to resources when not a publication resource https://github.com/w3c/audiobooks/issues/75
-agenda+ FEATURE REQUEST: -> Create a vocabulary of rel attributes for extra resources https://github.com/w3c/audiobooks/issues/7
-agenda+ ERRATA: -> duration property in JSON example uses incorrect syntax (number instead of ISO 8601 string format) https://github.com/w3c/audiobooks/issues/109
+agenda+ ISSUE:  -> duration property when using t= fragment selectors https://github.com/w3c/audiobooks/issues/110 
+agenda+ ISSUE:  -> Add note about the importance of adding the "duration" property to readingOrder items https://github.com/w3c/audiobooks/issues/108 
+agenda+ FEATURE REQUEST:  -> Possible requirement for one image per track https://github.com/w3c/audiobooks/issues/106 
+agenda+ FEATURE REQUEST:  -> Require the format and processing of the table of contents https://github.com/w3c/audiobooks/issues/97 
+agenda+ FEATURE REQUEST:  -> Requirement for a table of contents https://github.com/w3c/audiobooks/issues/96 
+agenda+ FEATURE REQUEST:  -> A standard rel value for the primary entry page https://github.com/w3c/audiobooks/issues/78 
+agenda+ FEATURE REQUEST:  -> Deep Linking for Packaged Audiobooks https://github.com/w3c/audiobooks/issues/76 
+agenda+ FEATURE REQUEST:  -> Add primary entry page to resources when not a publication resource https://github.com/w3c/audiobooks/issues/75 
+agenda+ FEATURE REQUEST:  -> Create a vocabulary of rel attributes for extra resources https://github.com/w3c/audiobooks/issues/7 
+agenda+ ERRATA:  -> duration property in JSON example uses incorrect syntax (number instead of ISO 8601 string format) https://github.com/w3c/audiobooks/issues/109 
 
 agenda: https://lists.w3.org/Archives/Public/w3c-wai-gl/2022JanMar/0059.html
 clear agenda
@@ -155,6 +155,16 @@ agenda+ Start Workflow - Presentation Availability Convergence
 agenda+ Workflow Interaction - Submit Presentation Convergence
 agenda+ Issue Processing (as time allows)
 agenda+ Any other business?
+
+agenda: https://www.w3.org/events/meetings/b9d3fe3e-c3c1-4154-a26d-6b4be1137a9b/20220217T160000
+clear agenda
+agenda+ This meeting
+agenda+ IMSC HRM
+agenda+ Status on HR and WR
+agenda+ Issues (including HR issues)
+agenda+ Rechartering status update
+agenda+ Dubbing and AD requirements
+agenda+ AOB – please notify of any other AOB now!
 
 EOF
 
