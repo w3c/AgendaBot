@@ -1558,9 +1558,11 @@ sub addison_agenda_parser($$$$)
   # Topic: ACTION-2309: Research xpath3 function definitions (Erik)
   # Topic: ACTION-2315: Report on event handling in web components (Erik)
   #
+  # or variations starting with "Agenda topics" or "Agendabot agenda".
+  #
   return () if $plaintext !~ /^\h*=+\h*AGENDA\h*=/mi
       && $plaintext !~ /^\h*Agenda\n\h*------/mi
-      && $plaintext !~ /^\h*agenda items/mi;
+      && $plaintext !~ /^\h*(?:Agendabot\h+)?agenda (?:items|topics)/mi;
   push @agenda, $1 while $plaintext =~ /^\h*Topic\h*:\h*(.+)/mgi;
   return @agenda;
 }
