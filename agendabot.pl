@@ -901,7 +901,7 @@ sub status($$)
     }
     $s .= " and " if defined $calendars;
   }
-  if (defined $calendars) {
+  if (defined $calendars && $calendars ne '') {
     if ($calendars !~ / /) {
       $s .= "the calendar for this channel is $calendars";
     } else {
