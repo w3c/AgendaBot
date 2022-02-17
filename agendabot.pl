@@ -400,10 +400,10 @@ sub parse_and_print_agenda($$$)
   # Print the agenda in Zakim's format.
   #
   if (ref $who eq 'GLOB') {	# We are testing (option -o)
-    print $who encode('UTF-8', "agenda: $uri\n");
-    print $who encode('UTF-8', "clear agenda\n");
-    print $who encode('UTF-8', "agenda+ $_\n") foreach (@agenda);
-    print $who encode('UTF-8', "\n");
+    print $who "agenda: $uri\n";
+    print $who "clear agenda\n";
+    print $who "agenda+ $_\n" foreach (@agenda);
+    print $who "\n";
   } else {
     $self->say({channel => $channel, body => "clear agenda"});
     $self->say({channel => $channel, body => "agenda+ " . $_})
