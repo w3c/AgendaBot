@@ -309,7 +309,9 @@ Topic: AOB?
 
 Topic: Radar</pre>
 
-<p>The word ‘AGENDA’ may also be underlined with dashes:
+<p>Instead of ‘agenda’ between ‘=’ signs, an occurrence of ‘agenda
+items’, ‘agenda topics’, ‘agendabot agenda’ or the word ‘agenda’
+underlined with dashes is also enough:
 
 <pre class=command>Agenda
 ------
@@ -368,9 +370,9 @@ agenda+ [css-display] Blockifications
 agenda+ [cssom-1] Replace steps of set a CSS declaration</pre>
 
 <li>
-<p>If the agenda is in an HTML page, agendabot looks for the word
-‘agenda’ and then for a list (<code>&lt;ol&gt;</code>
-or <code>&lt;ul&gt;</code>). E.g.:
+<p>If the agenda is in an HTML page, agendabot also looks for a list
+(<code>&lt;ol&gt;</code> or <code>&lt;ul&gt;</code>) that occurs after
+the word ‘agenda’ . E.g.:
 
 <pre class=command>&lt;h2&gt;Agenda&lt;/h2&gt;
 &lt;ol&gt;
@@ -413,5 +415,5 @@ on GitHub.
 href="https://www.w3.org/2001/12/zakim-irc-bot.html#agenda" >read (and
 write) agendas in RDF.</a>
 
-<address>Last modified $Date: Mon Feb  7 22:46:47 2022 UTC $<br>
+<address>Last modified $Date: Mon Feb 21 19:26:01 2022 UTC $<br>
 by $Author: Bert Bos $</address>
