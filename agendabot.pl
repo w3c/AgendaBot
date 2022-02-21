@@ -1352,6 +1352,7 @@ sub tree_to_text($$)
     $status->{pending_vspace} = 3;
     $status->{indent} -= 2;
     tree_to_text($_, $status) foreach $elt->content_list();
+    $status->{text} .= "\n------";
     $status->{indent} += 2;
     $status->{pending_vspace} = 2 if $status->{pending_vspace} < 2;
 
