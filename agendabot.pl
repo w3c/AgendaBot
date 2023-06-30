@@ -22,8 +22,6 @@
 # TODO: Judy's idea: after a meeting, defer remaining agenda items to
 # the next meeting. (Or is that more something for Zakim?)
 #
-# TODO: If the nick is already in use, try again with a different one.
-#
 # TODO: Don't join a channel if there is another instance of AgendaBot
 # already.
 #
@@ -244,6 +242,7 @@ sub request($$$$;$)
   return (508, undef, undef) if $nredirects > MAX_REDIRECTS;
 
   $ua = LWP::UserAgent->new;
+  $ua->ssl_opts(verify_hostname => $self->{ssl_verify_hostname});
   $ua->agent(blessed($self) . '/' . VERSION);
   $ua->default_header('Accept' => 'text/*');
   $ua->timeout(10);
@@ -374,11 +373,10 @@ sub parse_and_print_agenda($$$)
     $document =~ s/.*(<pre[^>]+(?:class|id)="body">.*<\/pre>).*/$1/s;
     $plaintext = html_to_text($document, $uri);
   } elsif ($uri =~ /^https:\/\/www\.w3\.org\/events\/meetings\//i) {
-    # It is an event from the group calendar, remove the footer and
-    # everything before the agenda.
-    $document =~ s/<h2 id="(?:join|participants)">.*//s
-	or $self->log("Bug? Did not find <h2 id=join or participants");
-    $document =~ s/^.*(?=<h2 id="agenda")//s;
+    # It is an event from the group calendar. Remove everything except
+    # the agenda.
+    $document =~ s/^.*<h2 id="agenda">Agenda<\/h2>(.*)<\/div>.*$/$1/s or
+	$document = '';
     $plaintext = html_to_text($document, $uri);
   } else {
     # If it is an HTML or XML document, render it to plain text. Some of
@@ -474,7 +472,7 @@ sub find_agenda_process($$$$$)
   my @calendar_urls = $calendars ? split(/ /, $calendars) : ();
   my @urls = split(/ /, $lists);
   my $channel = $info->{channel};
-  my (@agenda, $url, $oldest, %seen, $plaintext);
+  my (@agenda, $url, $oldest, %seen);
 
   binmode(STDOUT, ":utf8");
   binmode(STDERR, ":utf8");
@@ -490,27 +488,25 @@ sub find_agenda_process($$$$$)
     my ($code, $mediatype, $document) = $self->get($info, $calendar);
     next if $code != 200;
 
-    # Loop over all date-times and links in the calendar.
-    while (scalar(@agenda) < 2 &&
-	   $document =~ /datetime="([0-9T:+-]+)".*?href="([^"]+)"/sg) {
-      # TODO: Also check that the time isn't too far into the future?
-      next if $self->get_date_from_datetime($1) < $oldest;
-      $url = URI->new_abs($2, $calendar)->canonical->as_string;
-      my ($code, $mediatype, $eventdoc) = $self->get($info, $url);
-      next if $code != 200;
+    # Find the first link with class="card__link". This is presumably
+    # a link to the the next upcoming meeting. If there is none, try
+    # the next calendar.
+    $document =~ /<a\s+class="card__link"\s+href="(.+)"/ or next;
 
-      # Remove the joining instructions and the rest.
-      # Remove everything before the agenda.
-      $eventdoc =~ s/<h2 id="(join|participants)".*//s
-	  or print STDERR "Bug? Did not find <h2 id=join or participants\n";
-      $eventdoc =~ s/^.*(?=<h2 id="agenda")//s;
-      $plaintext = html_to_text($eventdoc, $url);
+    # Get that upcoming meeting.
+    $url = URI->new_abs($1, $calendar)->canonical->as_string;
+    my ($code1, $mediatype1, $eventdoc) = $self->get($info, $url);
+    next if $code1 != 200;
 
-      # Try each of the parsers until one returns two or more agenda items.
-      for my $parser (@parsers) {
-	my @h = &$parser($mediatype, $eventdoc, $plaintext, $url);
-	if (scalar(@h) > 1) {@agenda = @h; last;}
-      }
+    # Remove everything except the agenda. Try the next calendar if
+    # there is no agenda.
+    $eventdoc =~ s/^.*<h2 id="agenda">Agenda<\/h2>(.*)<\/div>.*$/$1/s or next;
+
+    # Try each of the parsers until one returns two or more agenda items.
+    my $plaintext = html_to_text($eventdoc, $url);
+    for my $parser (@parsers) {
+      my @h = &$parser($mediatype1, $eventdoc, $plaintext, $url);
+      if (scalar(@h) > 1) {@agenda = @h; last;}
     }
   }
 
@@ -534,9 +530,9 @@ sub find_agenda_process($$$$$)
     # Extract the original mail body from the HTML page.
     # print STDERR "Extracting the mail body\n";
     $document =~ s/.*(<pre[^>]+(?:class|id)="body">.*<\/pre>).*/$1/s;
-    $plaintext = html_to_text($document, $url);
 
     # Try each of the parsers until one returns two or more agenda items.
+    my $plaintext = html_to_text($document, $url);
     for my $parser (@parsers) {
       my @h = &$parser($mediatype, $document, $plaintext, $url);
       if (scalar(@h) > 1) {@agenda = @h; last;}
@@ -1103,7 +1099,7 @@ sub help($$)
 }
 
 
-# connected -- log a successful connection
+# connected -- handle a successful connection to a server
 sub connected($)
 {
   my ($self) = @_;
@@ -1720,13 +1716,13 @@ sub quoted_agenda_parser($$$$)
 my (%opts, $ssl, $user, $password, $host, $port, %passwords, $channel);
 
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
-getopts('c:C:e:m:n:N:o:r:v', \%opts) or die "Try --help\n";
+getopts('c:C:e:km:n:N:o:r:v', \%opts) or die "Try --help\n";
 
 if (!$opts{'o'}) {
   # The single argument must be an IRC-URL.
   #
   die "Usage: $0 [options] [--help] irc[s]://server...\n" if $#ARGV != 0;
-  $ARGV[0] =~ m/^(ircs?):\/\/(?:([^:]+):([^@]+)?@)?([^:\/#?]+)(?::([^\/]*))?(?:\/(.*))?$/i or
+  $ARGV[0] =~ m/^(ircs?):\/\/(?:([^:]+):([^@]+)?@)?([^:\/#?]+)(?::([^\/]*))?(?:\/(.+)?)?$/i or
       die "Argument must be a URI starting with `irc:' or `ircs:'\n";
   $ssl = $1 eq 'ircs';
   $user = $2 =~ s/%([0-9A-Fa-f]{2})/chr(hex($1))/egr if defined $2;
@@ -1759,6 +1755,7 @@ my $bot = AgendaBot->new(
   passwords_file => $opts{'c'},
   security_exceptions_uri => $opts{'e'},
   verbose => defined $opts{'v'},
+  ssl_verify_hostname => $opts{'k'} ? 0 : 1,
   associations_file => $opts{'m'} // 'agendabot.assoc');
 
 if ($opts{'o'}) {
@@ -2126,7 +2123,14 @@ channel or is dismissed from one. This way, when agendabot is stopped
 and then restarted (with the same B<-r> option), it will automatically
 rejoin the channels it was on when it was stopped.
 
-=item B<C> I<charset>
+=item B<-k>
+
+Do not verify the hostname against the SSL certificate when
+downloading a potential agenda from an HTTPS URL. This makes the
+download insecure, but allows downloading an agenda from a web site
+with an expired or self-signed certificate.
+
+=item B<-C> I<charset>
 
 Set the character encoding for messages. This should match what the
 IRC server expects. The default is utf8.
