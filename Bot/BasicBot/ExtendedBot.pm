@@ -14,6 +14,7 @@ use warnings;
 use utf8;
 use POE::Kernel;
 use POE::Session;
+use POE qw(Component::IRC Component::IRC::Plugin::NickReclaim);
 
 
 # run -- start the event loop
@@ -25,8 +26,8 @@ sub run
   POE::Session->create(
     object_states => [
       $self => {
-	_start => "start_state",
-	die    => "die_state",
+	_start           => "start_state",
+	die              => "die_state",
 
 	irc_001          => "irc_001_state",
 	irc_msg          => "irc_said_state",
@@ -37,11 +38,14 @@ sub run
 	irc_disconnected => "irc_disconnected_state",
 	irc_error        => "irc_error_state",
 
+	irc_invite       => "irc_invite_state",
+	irc_whois        => "irc_whois_state",
 	irc_join         => "irc_chanjoin_state",
 	irc_part         => "irc_chanpart_state",
 	irc_kick         => "irc_kicked_state",
 	irc_nick         => "irc_nick_state",
 	irc_quit         => "irc_quit_state",
+
 	irc_mode         => "irc_mode_state",
 
 	fork_close       => "fork_close_state",
@@ -52,24 +56,69 @@ sub run
 	irc_332          => "topic_raw_state",
 	irc_topic        => "topic_state",
 
-	irc_invite       => 'irc_invite_state',
-	irc_whois        => 'irc_whois_state',
-
 	irc_shutdown     => "shutdown_state",
 
 	irc_raw          => "irc_raw_state",
 	irc_raw_out      => "irc_raw_out_state",
 
-	tick => "tick_state",
+	tick             => "tick_state",
       }
     ]
       );
 
-  # and say that we want to recive said messages
+  # and say that we want to receive said messages
   $poe_kernel->post($self->{IRCNAME}, 'register', 'all');
 
   # run
   $poe_kernel->run() if !$self->{no_run};
+  return;
+}
+
+
+# start_state -- called just after the IRC object is created
+sub start_state
+{
+  my ($self, $kernel, $session) = @_[OBJECT, KERNEL, SESSION];
+
+  # This method differs from the method inherited from Bot::BasicBot
+  # by the addition of the NickReclaim plugin. It automatically adds
+  # an underscore to the nick if the requested nick is already in use
+  # and tries to reclaim the requested nick when it becomes available.
+
+  $kernel->sig('DIE', 'die');
+  $self->{session} = $session;
+
+  # Make an alias for our session, to keep it from getting GC'ed.
+  $kernel->alias_set($self->{ALIASNAME});
+  $kernel->delay('tick', 30);
+
+  $self->{IRCOBJ} = POE::Component::IRC::State->spawn(
+      Nick      => $self->nick,
+      Server    => $self->server,
+      Port      => $self->port,
+      Password  => $self->password,
+      UseSSL    => $self->ssl,
+      Flood     => $self->flood,
+      LocalAddr => $self->localaddr,
+      useipv6   => $self->useipv6,
+      webirc    => $self->webirc,
+      $self->charset_encode(
+	Nick     => $self->nick,
+	Username => $self->username,
+	Ircname  => $self->name),
+    alias => $self->{IRCNAME});
+
+  $self->{IRCOBJ}->plugin_add(
+    'Connector',
+    POE::Component::IRC::Plugin::Connector->new());
+
+  $kernel->post($self->{IRCNAME}, 'register', 'all');
+
+  $self->{IRCOBJ}->plugin_add(
+    'NickReclaim',
+    POE::Component::IRC::Plugin::NickReclaim->new(poll => 30));
+
+  $kernel->post($self->{IRCNAME}, 'connect' => {});
   return;
 }
 
@@ -86,7 +135,21 @@ sub got_whois { return }
 sub disconnected
 {
   my ($self, $server) = @_;
-  $self->log("Lost connection to server $server.\n");
+  $self->log("Lost connection to server $server.");
+}
+
+
+# nick -- return or set our nick
+sub nick
+{
+  my $self = shift;
+
+  if (defined $self->{IRCOBJ}) {
+    $self->{IRCOBJ}->yield('nick', shift) if @_;
+    return $self->{IRCOBJ}->nick_name;
+  } else {
+    return $self->SUPER::nick(@_);
+  }
 }
 
 
@@ -222,6 +285,58 @@ sub say
 }
 
 
+# emote -- send text to a channel as with "/me"
+sub emote
+{
+  # Override the inherited method, because we want to handle multiline text.
+
+  # If we're called without an object ref, then we're handling emoting
+  # stuff from inside a forked subroutine, so we'll freeze it, and
+  # toss it out on STDOUT so that POE::Wheel::Run's handler can pick
+  # it up.
+  if (!ref $_[0]) {
+    print $_[0], "\n";
+    return 1;
+  }
+
+  # Otherwise, this is a standard object method
+
+  my $self = shift;
+  my $args;
+  if (ref $_[0]) {
+    $args = shift;
+  } else {
+    my %args = @_;
+    $args = \%args;
+  }
+
+  my $body = $args->{body};
+
+  # Work out who we're going to send the message to
+  my $who = $args->{channel} eq "msg" ? $args->{who} : $args->{channel};
+
+  # If we have a long body, split it up..
+  local $Text::Wrap::columns = 300;
+  local $Text::Wrap::unexpand = 0; # no tabs
+  local $Text::Wrap::break = qr/\s|(?<=-)/;
+  local $Text::Wrap::separator2 = "\n";
+  my $wrapped = Text::Wrap::wrap('', '… ', $body); #  =~ m!(.{1,300})!g;
+  # I think the Text::Wrap docs lie - it doesn't do anything special
+  # in list context
+  my @bodies = split /\n+/, $wrapped;
+
+  # post an event that will send the message
+  # if there's a better way of sending actions i'd love to know - jw
+  # me too; i'll look at it in v0.5 - sb
+
+  for my $body (@bodies) {
+    my ($enc_who, $enc_body) = $self->charset_encode($who, "ACTION $body");
+    $poe_kernel->post($self->{IRCNAME}, 'ctcp', $enc_who, $enc_body);
+  }
+
+  return;
+}
+
 # whois -- send a whois command to the server, argument is a nick
 sub whois
 {
@@ -235,13 +350,13 @@ sub whois
 sub join_channel
 {
   my ($self, $channel, $key) = @_;
-  $self->log("Trying to join '$channel'\n");
+  $self->log("Trying to join '$channel'");
   $poe_kernel->post($self->{IRCNAME}, 'join', $self->charset_encode($channel),
 		    $self->charset_encode($key // ''));
 }
 
 
-# part_channel -- leave a channel, the the channel name is give as argument
+# part_channel -- leave a channel, the channel name is given as argument
 sub part_channel
 {
   my ($self, $channel) = @_;
@@ -283,20 +398,10 @@ sub connect_server
 }
 
 
-# eval_error -- get or set a remembered error message
-sub eval_error
-{
-  my $self = shift;
-  $self->{eval_error} = shift if @_;
-  return $self->{eval_error};
-}
-
-
 # die_state -- handle a DIE event
 sub die_state
 {
   my ($kernel, $self, $ex) = @_[KERNEL, OBJECT, ARG1];
-  $self->eval_error($ex->{error_str});
   warn $ex->{error_str};
   $self->{IRCOBJ}->yield('shutdown');
   $kernel->sig_handled();
@@ -347,7 +452,9 @@ sub irc_received_state
   # This method is the same as the inherited one, but stricter when
   # deciding whether we are personally addressed: When our name is foo
   # and somebody says "foo," we assume we are addressed. But not if
-  # somebody says "foo:", "foo-" or even "fool".
+  # somebody says "foo:", "foo-" or even "fool". And also, when
+  # somebody asks help in a /me message, we reply in a /me message,
+  # too, instead of in a normal message.
 
   ($nick, $to, $body) = $self->charset_decode($nick, $to, $body);
 
@@ -400,7 +507,7 @@ sub irc_received_state
   # Check if someone was asking for help
   if ($mess->{address} && $mess->{body} =~ /^help\b/i) {
     $mess->{body} = $self->help($mess) or return;
-    $self->say($mess);
+    $self->$respond($mess);
     return;
   }
 
@@ -519,6 +626,13 @@ something, somebody joined, etc.)
 
 ExtendedBot itself is a subclass of BasicBot. You should read its
 documentation and look at its examples.
+
+ExtendedBot differs from BasicBot by the addition of some methods (see
+below). And it automatically handles the case that our nick name is
+already in use when we connect: It which will try again with an
+underscore added to the nick, and then try to switch to the original
+nick when it becomes available again. (It uses the plugin
+POE::Component::IRC::Plugin::NickReclaim for that.)
 
 =head1 METHODS TO OVERRIDE
 
@@ -695,7 +809,7 @@ arguments, notably a missing C<run> argument.
 Call this method to send a whois query to the server. The argument
 must be a nick name.
 
-=head2 join_channel
+=head2 C<join_channel>
 
 Call this method to join a channel. The argument is the name of a
 channel.
@@ -725,6 +839,15 @@ those passed to C<new>.) Note that calling C<run> causes the bot to
 connect to a server, so the C<connect_server> is only useful if the
 connection is lost.
 
+=head2 C<nick>
+
+Without an argument, returns our current nick. With an argument, tries
+to set our nick to that argument. If we are connected to a server,
+that means sending a request to the server. If the server is able to
+give us that nick, we will receive an event at some point and the
+C<nick_change> method will be called. If we are not connected, this
+just sets the nick to use for the next time we connect.
+
 =head1 ATTRIBUTES
 
 See the superclass, Bot::BasicBot, for a description of the attributes
@@ -732,16 +855,6 @@ C<server>, C<port>, C<password>, C<ssl>, C<localaddr>, C<useipv6>,
 C<nick>, C<alt_nicks>, C<username>, C<name>, C<channels>,
 C<quit_message>, C<ignore_list>, C<charset>, C<flood>, C<no_run> and
 C<webirc>.
-
-=head2 C<eval_error>
-
-If the bot calls C<die>, the error message is stored and can be
-retrieved later with this method.
-
- my $bot = Bot::BasicBot::ExtendedBot->new(...);
- $bot->run();
- print $bot->eval_error() if $bot->eval_error();
- exit defined $bot->eval_error();
 
 =head1 OTHER METHODS
 
