@@ -60,6 +60,9 @@
 # text. It should convert it to LaTeX, or, if some day scribe.perl
 # accepts literal HTML, copy it as MathML.
 #
+# TODO: Recognize agenda in
+# https://www.w3.org/events/meetings/54fb3c39-8826-418b-bcac-46e112f08535/20220303T090000
+#
 # Created: 2018-07-09
 # Author: Bert Bos <bert@w3.org>
 #
@@ -305,7 +308,7 @@ sub request($$$$;$)
 	# recursively.
 	$self->log("request: cookie did not work on try $nredirects; delete it and try again");
 	delete $self->{cookies}->{$host_realm};
-	return $self->request($method, $info, $location, $nredirects + 1);
+	return $self->request($method, $info, $uri, $nredirects + 1);
       }
     } else {
       # Auth scheme is w3cstate, but no known cookie yet.
