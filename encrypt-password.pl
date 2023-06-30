@@ -26,7 +26,7 @@ my $progname = $0 =~ s|.*/||r;
 my $USAGE = "Usage: $progname encrypt|decrypt [password] [passphrase]";
 
 
-# decypt -- decrypt a base-64-encoded, encrypted password
+# decrypt -- decrypt a base-64-encoded, encrypted password
 sub decrypt($$)
 {
   my ($encrypted, $passphrase) = @_;
