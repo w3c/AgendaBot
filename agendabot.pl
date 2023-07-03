@@ -352,6 +352,20 @@ sub head($$$)
 }
 
 
+# get_agenda_from_event -- return the part of an event that contains the agenda
+sub get_agenda_from_event($)
+{
+  my $s = shift;
+
+  # Return the text between id=agenda and id=export_component.
+  if ($s =~ /<h2 id="?agenda"?>Agenda<\/h2>(.*)<div[^>]*id="?export_component\b/s) {
+    return $1;
+  } else {
+    return '';
+  }
+}
+
+
 # parse_and_print_agenda -- try to retrieve an agenda and print it on IRC
 sub parse_and_print_agenda($$$)
 {
@@ -378,8 +392,7 @@ sub parse_and_print_agenda($$$)
   } elsif ($uri =~ /^https:\/\/www\.w3\.org\/events\/meetings\//i) {
     # It is an event from the group calendar. Remove everything except
     # the agenda.
-    $document =~ s/^.*<h2 id="agenda">Agenda<\/h2>(.*)<\/div>.*$/$1/s or
-	$document = '';
+    $document = get_agenda_from_event($document); # May return ''
     $plaintext = html_to_text($document, $uri);
   } else {
     # If it is an HTML or XML document, render it to plain text. Some of
@@ -467,7 +480,7 @@ sub promising_subject($)
 }
 
 
-# find_agenda_process -- find an agenda in recent email (background process)
+# find_agenda_process -- find agenda in email or calendar (background process)
 sub find_agenda_process($$$$$)
 {
   my ($body, $self, $info, $lists, $calendars, $period) = @_;
@@ -503,7 +516,8 @@ sub find_agenda_process($$$$$)
 
     # Remove everything except the agenda. Try the next calendar if
     # there is no agenda.
-    $eventdoc =~ s/^.*<h2 id="agenda">Agenda<\/h2>(.*)<\/div>.*$/$1/s or next;
+    $eventdoc = get_agenda_from_event($eventdoc);
+    next if $eventdoc eq '';
 
     # Try each of the parsers until one returns two or more agenda items.
     my $plaintext = html_to_text($eventdoc, $url);
