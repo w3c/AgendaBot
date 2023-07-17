@@ -182,10 +182,21 @@ agenda+ Action Items
 agenda+ Info Share and Progress Reports
 agenda+ Review on-going issues
 
+agenda: https://www.w3.org/events/meetings/c5b143d1-0a5b-4adb-8d60-0f5f9bfe5a41/
+clear agenda
+agenda+ Agenda Review
+agenda+ Action Items
+agenda+ Info Share
+agenda+ RADAR Review
+agenda+ Pending Issue Review
+agenda+ Various Pull Requests
+agenda+ AOB?
+
 EOF
 
 
-perl agendabot.pl -v -m /dev/null -o $TMP1 `grep -E '^agenda:' $TMP2 | cut -d' ' -f2-`
+perl agendabot.pl -v -m /dev/null -o $TMP1 \
+     `grep -E '^agenda:' $TMP2 | cut -d' ' -f2-`
 
 diff -u $TMP2 $TMP1 && echo OK || echo Errors found
 
