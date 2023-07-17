@@ -166,6 +166,22 @@ agenda+ Rechartering status update
 agenda+ Dubbing and AD requirements
 agenda+ AOB – please notify of any other AOB now!
 
+agenda: https://www.w3.org/events/meetings/04ee1fba-d1a3-4473-98cb-0726ce44cb9c/20230720T150000/
+clear agenda
+agenda+ Agenda Review
+agenda+ Action Items
+agenda+ Info Share
+agenda+ RADAR Review
+agenda+ Pending Issue Review
+agenda+ AOB?
+
+agenda: https://www.w3.org/events/meetings/fc585baf-5661-44ac-8a81-c599d8ab81bb/20230725T220000/
+clear agenda
+agenda+ Agenda
+agenda+ Action Items
+agenda+ Info Share and Progress Reports
+agenda+ Review on-going issues
+
 EOF
 
 
