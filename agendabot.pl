@@ -66,6 +66,9 @@
 # TODO: Is html_list_agenda_parser() needed? It runs after
 # two_level_agenda_parser(), which probably already found all lists.
 #
+# TODO: Use a neural network (e.g., TensorFlow) to extract an agenda
+# from a message?
+#
 # Created: 2018-07-09
 # Author: Bert Bos <bert@w3.org>
 #
@@ -320,7 +323,9 @@ sub request($$$$;$)
     } else {
       # Auth scheme is w3cstate, but no known cookie yet.
       # $cookies = $self->get_cookies($uri, $user, $password);
-      $cookies = $self->get_cookies($res->header('Location'), $user, $password);
+      $location = $res->header('Location');
+      $location = URI->new_abs($location, $uri)->canonical->as_string;
+      $cookies = $self->get_cookies($location, $user, $password);
       return (400, undef, undef) if !defined $cookies;
       $ua->cookie_jar($cookies);
       $self->{cookies}->{$host_realm} = $cookies;
@@ -334,6 +339,7 @@ sub request($$$$;$)
 
   # If we got a redirect, recurse.
   if (($location = $res->header('Location'))) {
+    $location = URI->new_abs($location, $uri)->canonical->as_string;
     return $self->request($method, $info, $location, $nredirects + 1);
   }
 
