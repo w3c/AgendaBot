@@ -63,6 +63,9 @@
 # TODO: Recognize agenda in
 # https://www.w3.org/events/meetings/54fb3c39-8826-418b-bcac-46e112f08535/20220303T090000
 #
+# TODO: Is html_list_agenda_parser() needed? It runs after
+# two_level_agenda_parser(), which probably already found all lists.
+#
 # Created: 2018-07-09
 # Author: Bert Bos <bert@w3.org>
 #
@@ -119,8 +122,8 @@ my @parsers = (
   \&bb_agenda_parser,
   \&addison_agenda_parser,
   \&koalie_and_plh_agenda_parser,
-  \&html_list_agenda_parser,
   \&two_level_agenda_parser,
+  \&html_list_agenda_parser,
   \&quoted_agenda_parser);
 
 
@@ -155,14 +158,18 @@ sub load($)
 sub is_exception($$$)
 {
   my ($self, $channel, $uri) = @_;
-  my @exceptions = @{$self->{exceptions} // []};
+  my $chan_and_uri;
 
-  # Find all URI prefixes that the channel may get. Check for each
-  # prefix if it is a prefix of the given uri.
+  # Each exception is of the form CHANNEL<TAB>URL-PREFIX. Check if one
+  # of them matches the passed channel and URI.
   #
-  foreach my $u (grep s/^\Q$channel\E\t//, @exceptions) {
-    $self->log("Security exception: $channel is allowed to get $uri");
-    return 1 if $uri =~ /^$u/;
+  return 0 if !$self->{exceptions};
+  $chan_and_uri = "$channel\t$uri";
+  foreach my $u (@{$self->{exceptions}}) {
+    if ($chan_and_uri =~ /^\Q$u\E/) {
+      $self->log("Security exception: $channel is allowed to get $uri");
+      return 1;
+    }
   }
   return 0;
 }
@@ -358,7 +365,7 @@ sub get_agenda_from_event($)
   my $s = shift;
 
   # Return the text between id=agenda and id=export_component.
-  if ($s =~ /<h2 id="?agenda"?>Agenda<\/h2>(.*)<div[^>]*id="?export_component\b/s) {
+  if ($s =~ /(<h2 id="?agenda"?>Agenda<\/h2>.*)<div[^>]*id="?export_component\b/s) {
     return $1;
   } else {
     return '';
@@ -633,10 +640,16 @@ sub find_topics_process($$$$$)
   binmode(STDOUT, ":utf8");
   binmode(STDERR, ":utf8");
 
-  if ($period =~ /(\d+) day/) {$maxtries *= $1; $oldest = time - 60*60*24*$1;}
-  elsif ($period =~ /(\d+) week/) {$maxtries *= 7*$1; $oldest = 60*60*24*7*$1;}
-  else {print STDERR "Bug! find_topics_process(... \"$period\")\n"; return;}
-
+  if ($period =~ /(\d+) day/) {
+    $maxtries *= $1;
+    $oldest = time - 60 * 60 * 24 * $1;
+  } elsif ($period =~ /(\d+) week/) {
+    $maxtries *= 7*$1;
+    $oldest = time - 60 * 60 * 24 * 7 * $1;
+  } else {
+    print STDERR "Bug! find_topics_process(... \"$period\")\n";
+    return;
+  }
   print "$channel\t(\n";	# Signal the start of the array
   $seen{$_} = 1 foreach @urls;
   while (@urls && $tries++ < $maxtries) {
@@ -912,9 +925,9 @@ sub status($$)
     } else {
       $s .= "the mailing lists for this channel are " . ($lists =~ s/ /, /gr );
     }
-    $s .= " and " if defined $calendars;
   }
   if (defined $calendars && $calendars ne '') {
+    $s .= " and " if $s;
     if ($calendars !~ / /) {
       $s .= "the calendar for this channel is $calendars";
     } else {
@@ -1515,6 +1528,7 @@ sub html_to_text($$)
 	     ul_nesting => 0, base_url => $url, list_counter => 0,
 	     line_length => 0, width => 99999};
   tree_to_text($tree, $status);
+  # print STDERR $status->{text}, "\n";
   return $status->{text};
 }
 
@@ -1690,12 +1704,13 @@ sub two_level_agenda_parser($$$$)
   # Store the least indented marker in $delim, if any. If several
   # markers are indented the same, use the one that occurs most often.
   #
-  foreach my $d (qr/\d+\)/, qr/\d+\.(?:\d+\h)?/, qr/\d+\h*-/, qr/\*\h/,
+  foreach my $d (qr/\(?\d+\)/, qr/\d+\.(?:\d+\h)?/, qr/\d+\h*-/, qr/\*\h/,
     qr/-\h/, qr/•\h/, qr/◦\h/, qr/⁃\h/) {
     if ($plaintext =~ /^(\h*)$d/m) {
       my $indent = length $1;
-      my $d1 = $1 . $d;
+      my $d1 = qr/\h{,$indent}$d/;		# or: $1 . $d
       my @matches = $plaintext =~ /^$d1/mg;
+
       if ($indent < $i || ($indent == $i && scalar(@matches) > $n)) {
 	$i = $indent;
 	$delim = $d1;
@@ -1731,6 +1746,8 @@ sub quoted_agenda_parser($$$$)
 # Main body
 
 my (%opts, $ssl, $user, $password, $host, $port, %passwords, $channel);
+
+binmode(STDERR, ":utf8");
 
 $Getopt::Std::STANDARD_HELP_VERSION = 1;
 getopts('c:C:e:km:n:N:o:r:v', \%opts) or die "Try --help\n";
