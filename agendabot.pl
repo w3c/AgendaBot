@@ -1708,7 +1708,7 @@ sub two_level_agenda_parser($$$$)
     qr/-\h/, qr/•\h/, qr/◦\h/, qr/⁃\h/) {
     if ($plaintext =~ /^(\h*)$d/m) {
       my $indent = length $1;
-      my $d1 = qr/\h{,$indent}$d/;		# or: $1 . $d
+      my $d1 = qr/\h{0,$indent}$d/;		# or: $1 . $d
       my @matches = $plaintext =~ /^$d1/mg;
 
       if ($indent < $i || ($indent == $i && scalar(@matches) > $n)) {
