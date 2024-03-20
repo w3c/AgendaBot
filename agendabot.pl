@@ -1183,7 +1183,7 @@ sub decrypt($$$)
 sub read_passwords_file($)
 {
   my $self = shift;
-  my (%passwords, $fh, $passphrase);
+  my (%passwords, $fh, $passphrase, $crypt_pw);
   my $path = $self->{passwords_file};
   my $encrypted = 0;
 
@@ -1198,7 +1198,7 @@ sub read_passwords_file($)
   while (<$fh>) {
     if (/^#/) {}		# Comment line
     elsif (/^\s*$/) {}		# Empty line
-    elsif (/^\s*!encrypted\b/) {$encrypted = 1}
+    elsif (/^\s*!encrypted\b(?:\t(.*))?/) {$encrypted = 1; $crypt_pw = $1}
     elsif (/^(.*\t.*)\t(.*\t.*)$/) {$passwords{$1} = $2;}
     else {return "$path:$.: Syntax error: line has less than four fields.";}
   }
@@ -1211,6 +1211,10 @@ sub read_passwords_file($)
     ReadMode('restore');
     print "\n";
     chomp $passphrase;
+    if (defined $crypt_pw &&
+      $self->decrypt("test\t$crypt_pw", $passphrase) ne "test\t$passphrase") {
+      return "Incorrect passphrase";
+    }
     foreach my $k (keys %passwords) {
       $passwords{$k} = $self->decrypt($passwords{$k}, $passphrase);
     }
