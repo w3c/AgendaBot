@@ -1173,8 +1173,8 @@ sub decrypt($$$)
   $repeat = int((length($encrypted) + $len - 1) / $len);
   $mask = $mask x $repeat;
   $password = $encrypted ^ $mask;
-  $password = decode('UTF-8', $password);
   $password =~ s/\0+$//;
+  $password = decode('UTF-8', $password);
   return "$user\t$password";
 }
 
