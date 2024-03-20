@@ -38,8 +38,8 @@ sub decrypt($$)
   $repeat = int((length($encrypted) + $len - 1) / $len);
   $mask = $mask x $repeat;			# Make mask long enough
   $password = $encrypted ^ $mask;		# Unmask the password
-  $password = decode('UTF-8', $password);	# Convert to a Perl string
   $password =~ s/\0+$//;			# Trim null bytes
+  $password = decode('UTF-8', $password);	# Convert to a Perl string
   return $password;
 }
 
@@ -53,6 +53,7 @@ sub encrypt($$)
   $mask = sha256(encode('UTF-8', $passphrase)); # SHA256 digest of passphrase
   $password = encode('UTF-8', $password);	# Perl string to bitstring
   $len = length($mask);				# Length of mask
+  $password .= chr(0) while length($password) % $len != 0;
   $repeat = int((length($password) + $len - 1) / $len);
   $mask = $mask x $repeat;			# Make mask long enough
   $encrypted = $password ^ $mask;		# Mask the pasword
