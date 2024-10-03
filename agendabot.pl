@@ -72,7 +72,7 @@
 # Created: 2018-07-09
 # Author: Bert Bos <bert@w3.org>
 #
-# Copyright © 2018-2022 World Wide Web Consortium, (Massachusetts Institute
+# Copyright © 2018-2024 World Wide Web Consortium, (Massachusetts Institute
 # of Technology, European Research Consortium for Informatics and
 # Mathematics, Keio University, Beihang). All Rights Reserved. This
 # work is distributed under the W3C® Software License
@@ -414,7 +414,7 @@ sub parse_and_print_agenda($$$)
   }
 
   # Try the parsers in order. Stop as soon as a parser returns an
-  # agenda of two or more items. Otherwise use the first one that
+  # agenda of two or more items. Otherwise use the last one that
   # returned one item.
   for my $parser (@parsers) {
     my @h = &$parser($type, $document, $plaintext // $document, $uri);
