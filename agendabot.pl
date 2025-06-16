@@ -125,6 +125,7 @@ my @parsers = (
   \&bb_agenda_parser,
   \&addison_agenda_parser,
   \&koalie_and_plh_agenda_parser,
+  \&markdown_agenda_parser,
   \&two_level_agenda_parser,
   \&html_list_agenda_parser,
   \&quoted_agenda_parser);
@@ -386,7 +387,7 @@ sub parse_and_print_agenda($$$)
   my $channel = $info->{channel};
   my $who = $info->{who};
   my @agenda = ();
-  my ($code, $type, $document, $plaintext);
+  my ($code, $type, $document, $plaintext, $uri2);
 
   # Try to download the resource.
   #
@@ -407,6 +408,17 @@ sub parse_and_print_agenda($$$)
     # the agenda.
     $document = get_agenda_from_event($document); # May return ''
     $plaintext = html_to_text($document, $uri);
+  } elsif ($uri =~ /^https:\/\/github.com\/(.*)\/blob\/(.*)/i) {
+    # GitHub pages with /blob/ in their URL have no usable content,
+    # because they are filled by JavaScript. But we can try the
+    # related URL on https://raw.githubusercontent.com/
+    $uri2 = "https://raw.githubusercontent.com/$1/refs/heads/$2";
+    ($code, $type, $document) = $self->get($info, $uri2);
+    return "$who, sorry, I don't have a password for $uri2" if $code == 401;
+    return "$who, sorry, the document at $uri2 is protected." if $code == 403;
+    return "$who, sorry, $uri2 doesn't seem to exist." if $code == 404;
+    return "$who, sorry, could not get $uri2 (code $code)." if !defined $document;
+    return "$who, sorry, $uri2 doesn't seem to be text." if $type!~/^text\/|\+xml\b/;
   } else {
     # If it is an HTML or XML document, render it to plain text. Some of
     # the parsers only handle plain text.
@@ -1682,6 +1694,36 @@ sub html_list_agenda_parser($$$$)
   }
 
   return @agenda;
+}
+
+
+# markdown_agenda_parser -- find an agenda in markdown
+sub markdown_agenda_parser($$$$)
+{
+  my ($mediatype, $document, $plaintext, $url) = @_;
+  my (@headers, @listitems);
+
+  # The agenda is made up of level-2 headers, e.g.,
+  #
+  #   ## Actions
+  #   ## Issues
+  #   ## AOB
+  #
+  # or a list, e.g.,
+  #
+  #   - Actions
+  #   - Issues
+  #   - AOB
+  #
+  # TODO: list items may occupy more than one line.
+
+  return () if $mediatype !~ /^text\/plain\b/i;
+
+  push @headers, $1 while $plaintext =~ /^ {0,3}## +(.*)/mg;
+  return @headers if scalar @headers > 1;
+  push @listitems, $1 while $plaintext =~ /^ {0,3}- +(.*)/mg;
+  return @listitems if scalar @listitems > 1;
+  return scalar @headers > 0 ? @headers : @listitems;
 }
 
 
