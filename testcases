@@ -182,7 +182,7 @@ agenda+ Action Items
 agenda+ Info Share and Progress Reports
 agenda+ Review on-going issues
 
-agenda: https://www.w3.org/events/meetings/c5b143d1-0a5b-4adb-8d60-0f5f9bfe5a41/
+agenda: https://www.w3.org/events/meetings/c5b143d1-0a5b-4adb-8d60-0f5f9bfe5a41/20230720T150000/
 clear agenda
 agenda+ Agenda Review
 agenda+ Action Items
@@ -191,6 +191,14 @@ agenda+ RADAR Review
 agenda+ Pending Issue Review
 agenda+ Various Pull Requests
 agenda+ AOB?
+
+agenda: https://github.com/w3c/data-shapes/blob/agenda/admin/agenda-2025-06-09.md
+clear agenda
+agenda+ Announcements
+agenda+ Topical PRs
+agenda+ Decisions
+agenda+ Discussion
+agenda+ Process
 
 EOF
 
