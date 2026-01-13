@@ -126,8 +126,8 @@ my @parsers = (
   \&addison_agenda_parser,
   \&koalie_and_plh_agenda_parser,
   \&markdown_agenda_parser,
-  \&two_level_agenda_parser,
   \&html_list_agenda_parser,
+  \&two_level_agenda_parser,
   \&quoted_agenda_parser);
 
 
@@ -408,12 +408,12 @@ sub parse_and_print_agenda($$$)
     # the agenda.
     $document = get_agenda_from_event($document); # May return ''
     $plaintext = html_to_text($document, $uri);
-  } elsif ($uri =~ /^https:\/\/github.com\/(.*)\/blob\/(.*)/i) {
+  } elsif ($uri =~ m{^(https://github.com/[^/]+/[^/]+)/blob/(.*)$}i) {
     # GitHub pages with /blob/ in their URL have no usable content,
     # because they are filled by JavaScript. But we can try the
-    # related URL on https://raw.githubusercontent.com/
-    $uri2 = "https://raw.githubusercontent.com/$1/refs/heads/$2";
-    ($code, $type, $document) = $self->get($info, $uri2);
+    # related URL with /raw/ (Which redirects once, hence the parameter 1.)
+    $uri2 = "$1/raw/$2";
+    ($code, $type, $document) = $self->get($info, $uri2, 1);
     return "$who, sorry, I don't have a password for $uri2" if $code == 401;
     return "$who, sorry, the document at $uri2 is protected." if $code == 403;
     return "$who, sorry, $uri2 doesn't seem to exist." if $code == 404;
@@ -1486,7 +1486,7 @@ sub tree_to_text($$)
     # '->' and append the URL, to create an Ivan link.
     if ($url ne $elt->as_trimmed_text()) {
       # TODO: In preformatted text, the first and last space may be too much.
-      $elt->unshift_content(' -> ');
+      $elt->unshift_content('-> ');
       $elt->push_content(' ', $url, ' ');
     }
     tree_to_text($_, $status) foreach $elt->content_list();
@@ -1646,7 +1646,7 @@ sub contents_to_text($$)
     if ($child->tag() eq '~text') {
       $s .= $child->attr('text');
     } elsif ($child->tag() eq 'a' && $baseurl) {
-      $s .= ' -> ' . contents_to_text($child, undef) . ' ' .
+      $s .= '-> ' . contents_to_text($child, undef) . ' ' .
 	  URI->new_abs($child->attr('href'), $baseurl)->canonical->as_string .
 	  ' ';
     # } elsif ($child->tag() eq 'b' || $child->tag() eq 'strong') {
@@ -1669,18 +1669,26 @@ sub contents_to_text($$)
 sub html_list_agenda_parser($$$$)
 {
   my ($mediatype, $document, $plaintext, $url) = @_;
-  my (@agenda, $tree, $start, $h, $s);
+  my (@agenda, $tree, $start, $h, $s, $fragment);
 
   return () if $mediatype !~ /^text\/html\b/i;
   $tree = HTML::TreeBuilder->new_from_content($document);
   $tree->objectify_text();
 
-  # Find the word "agenda", assumed to indicate the start of the agenda.
-  $start = $tree->look_down(_tag=>'~text', text=>qr/\bagenda\b/i);
+  # See if the URL had a fragment ID. If so, start searching from the
+  # element with that ID, if any.
+
+  # If the URL has a fragment ID, find the corresponding element,
+  # assumed to points to the start of the agenda. Otherwise, find the
+  # word "agenda", assumed to indicate the start of the agenda. Fail
+  # if neither works.
+  $fragment = $1 if $url =~ /#(.*)/;
+  $start = $tree->look_down(id=>$fragment) if $fragment;
+  $start = $tree->look_down(_tag=>'~text', text=>qr/\bagenda\b/i) if !$start;
   return () if !$start;
 
   # Find the first OL or UL after $start. Look in right siblings, then
-  # right siblings of the parent, than right siblings of the parent's
+  # right siblings of the parent, then right siblings of the parent's
   # parent, etc.
   while ($start && $start->tag() ne 'ol' && $start->tag() ne 'ul') {
     until (!$start || ($h = $start->right)) {$start = $start->parent()}
@@ -1703,7 +1711,7 @@ sub markdown_agenda_parser($$$$)
   my ($mediatype, $document, $plaintext, $url) = @_;
   my (@headers, @listitems);
 
-  # The agenda is made up of level-2 headers, e.g.,
+  # The agenda is made up of headings, e.g.,
   #
   #   ## Actions
   #   ## Issues
@@ -1715,12 +1723,37 @@ sub markdown_agenda_parser($$$$)
   #   - Issues
   #   - AOB
   #
+  # or, if there is a heading that says "Agenda", the headings or list
+  # items in the section after it:
+  #
+  #   ## Agenda
+  #   ### Actions
+  #   ### Issues
+  #   ### AOB
+  #   ## How to join
+  #
   # TODO: list items may occupy more than one line.
 
   return () if $mediatype !~ /^text\/plain\b/i;
 
-  push @headers, $1 while $plaintext =~ /^ {0,3}## +(.*)/mg;
-  return @headers if scalar @headers > 1;
+  # If there is an H1 or H2 that says "Agenda...", reduce the text to
+  # the section after it.
+  if ($plaintext =~ /^ {0,3}# +Agenda\b/mi) {
+    $plaintext = $';
+    $plaintext = $` if $plaintext =~ /^ {0,3}# /m;
+  } elsif ($plaintext =~ /^ {0,3}## +Agenda\b/mi) {
+    $plaintext = $';
+    $plaintext = $` if $plaintext =~ /^ {0,3}##? /m;
+  }
+
+  # We assume the first heading that is not an H1 is an agenda item
+  # and all agenda items have the same level. (We don't look for
+  # subitems, because Zakim only allow one level.)
+  if ($plaintext =~ /^ {0,3}(##+) /m) {
+    my $level = $1;
+    push @headers, $1 while $plaintext =~ /^ {0,3}$level +(.*)/mg;
+    return @headers if scalar @headers > 1;
+  }
   push @listitems, $1 while $plaintext =~ /^ {0,3}- +(.*)/mg;
   return @listitems if scalar @listitems > 1;
   return scalar @headers > 0 ? @headers : @listitems;
