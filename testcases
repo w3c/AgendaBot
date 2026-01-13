@@ -22,7 +22,7 @@ clear agenda
 agenda+ Question about resolution on -> issue 110 https://github.com/w3c/audiobooks/issues/110 
 agenda+ PR: -> Correcting Errata and adding Change Log https://github.com/w3c/audiobooks/pull/111 
 agenda+ Charter Questions
-agenda+ Requiring TOCs [ -> 1 https://github.com/w3c/audiobooks/issues/97 ] [-> 2 https://github.com/w3c/audiobooks/issues/96 ]
+agenda+ Requiring TOCs [-> 1 https://github.com/w3c/audiobooks/issues/97 ] [-> 2 https://github.com/w3c/audiobooks/issues/96 ]
 
 agenda: https://www.w3.org/events/meetings/baf262b7-7551-4c04-96a0-662d85c35505/20220120T150000
 clear agenda
